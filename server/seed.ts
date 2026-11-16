@@ -40,7 +40,7 @@ if (((await one<{ n: number }>('SELECT COUNT(*)::int AS n FROM reports'))?.n ?? 
     const id = `BUG-${String(seq).padStart(4, '0')}`
     // video_path '' means "visible, but no video file" so demo rows show in the tracker.
     await run(
-      "INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, page_url, severity, status, video_path, resolved_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', $10)",
+      "INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, page_url, severity, status, video_path, submitted_at, resolved_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', $3, $10)",
       id, seq, ago(days), c, u, title, url, severity, status, status === 'Resolved' ? ago(days - 1) : null,
     )
     await run("INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, 'client', 'created', 'Report submitted')", id, ago(days))

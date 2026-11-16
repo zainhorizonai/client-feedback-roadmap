@@ -81,6 +81,11 @@ const SCHEMA = [
     ok INTEGER NOT NULL,
     error TEXT NOT NULL DEFAULT ''
   )`,
+  // Added after launch. Idempotent, so existing databases upgrade themselves on the next start.
+  'ALTER TABLE reports ADD COLUMN IF NOT EXISTS submitted_at TEXT',
+  "ALTER TABLE reports ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'Bug'",
+  'ALTER TABLE reports ADD COLUMN IF NOT EXISTS roadmap_stage TEXT',
+  'UPDATE reports SET submitted_at = created_at WHERE submitted_at IS NULL AND video_path IS NOT NULL',
   'CREATE INDEX IF NOT EXISTS idx_reports_client ON reports(client_id)',
   'CREATE INDEX IF NOT EXISTS idx_history_report ON history(report_id)',
   'CREATE INDEX IF NOT EXISTS idx_rate_hits ON rate_hits(key, at)',

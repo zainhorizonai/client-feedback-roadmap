@@ -22,13 +22,15 @@ export function AppShell() {
           <nav className="flex gap-1">
             {user.role === 'admin' ? (
               <>
-                <NavLink to="/admin" className={link}>Tracker</NavLink>
+                <NavLink to="/admin" end className={link}>Tracker</NavLink>
+                <NavLink to="/admin/roadmap" className={link}>Roadmap</NavLink>
                 <NavLink to="/admin/clients" className={link}>Clients</NavLink>
               </>
             ) : (
               <>
-                <NavLink to="/reports" end className={link}>My reports</NavLink>
-                <NavLink to="/reports/new" className={link}>New report</NavLink>
+                <NavLink to="/reports" end className={link}>My items</NavLink>
+                <NavLink to="/roadmap" className={link}>Roadmap</NavLink>
+                <NavLink to="/reports/new" className={link}>New</NavLink>
               </>
             )}
           </nav>

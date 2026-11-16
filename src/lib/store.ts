@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { api, ApiError, uploadVideo, type UploadFlow, type UploadMode } from './api'
 import { notify } from './toast'
-import type { Report, Severity, Status } from './types'
+import type { Kind, Report, RoadmapStage, Severity, Status } from './types'
 
 interface State { reports: Report[]; loaded: boolean }
 let state: State = { reports: [], loaded: false }
@@ -69,10 +69,16 @@ export interface NewReportInput {
   description: string
   pageUrl: string
   severity: Severity
+  kind: Kind
 }
 
-export async function createReport(input: NewReportInput, video: Blob, onProgress: (f: number) => void): Promise<Report> {
-  const { report, upload } = await api.post<{ report: Report; upload: { mode: UploadMode; flow?: UploadFlow } }>('/api/reports', input)
+/** The video is optional. Without one the report is complete as soon as it is created. */
+export async function createReport(input: NewReportInput, video: Blob | null, onProgress: (f: number) => void): Promise<Report> {
+  const { report, upload } = await api.post<{ report: Report; upload?: { mode: UploadMode; flow?: UploadFlow } }>('/api/reports', { ...input, withVideo: !!video })
+  if (!video || !upload) {
+    upsert(report)
+    return report
+  }
   try {
     const done = await uploadVideo(report.id, video, upload.mode, upload.flow, onProgress)
     upsert(done)
@@ -83,7 +89,7 @@ export async function createReport(input: NewReportInput, video: Blob, onProgres
   }
 }
 
-type Editable = Partial<Pick<Report, 'title' | 'description' | 'pageUrl' | 'severity' | 'notes' | 'resolutionUrl'>>
+type Editable = Partial<Pick<Report, 'title' | 'description' | 'pageUrl' | 'severity' | 'notes' | 'resolutionUrl' | 'kind'>>
 
 function optimistic(id: string, patch: Partial<Report>) {
   set({ ...state, reports: state.reports.map((r) => (r.id === id ? { ...r, ...patch } : r)) })
@@ -107,3 +113,13 @@ export const addClientComment = (id: string, text: string) =>
 
 export const clientConfirm = (id: string, fixed: boolean, note: string) =>
   act(() => api.post(`/api/reports/${id}/confirm`, { fixed, note }), fixed ? 'Thanks for confirming.' : 'Thanks. We will take another look.')
+
+export function setRoadmapStage(id: string, stage: RoadmapStage | null) {
+  optimistic(id, { roadmapStage: stage ?? undefined })
+  return act(() => api.patch(`/api/reports/${id}`, { roadmapStage: stage }), stage ? `Moved to "${stage}". The client has been emailed.` : 'Removed from the roadmap.')
+}
+
+/** Admin: add an item (roadmap or future work) on behalf of a client. */
+export async function addItemForClient(input: { clientId: string; title: string; description: string; kind: Kind; roadmapStage: RoadmapStage | null }): Promise<boolean> {
+  return act(() => api.post('/api/admin/items', input), 'Added. The client has been emailed.')
+}

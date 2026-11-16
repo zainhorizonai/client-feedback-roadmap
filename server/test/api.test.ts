@@ -479,3 +479,120 @@ describe('skipped sign-in requests are visible to the admin', () => {
     assert.match(note?.error, /no account for this address/)
   })
 })
+
+describe('optional video, item types and the roadmap', () => {
+  const admin = new Client()
+  const jane = new Client()
+  const sam = new Client()
+  let acme = ''
+  let globex = ''
+  const mails: Json[] = []
+
+  before(async () => {
+    await run('DELETE FROM rate_hits') // earlier tests used up the sign-in allowance
+    await admin.signIn('admin@test.com')
+    const clients = (await admin.json('GET', '/api/admin/clients')).data.clients as Json[]
+    acme = clients.find((c) => c.name === 'Acme')!.id
+    globex = clients.find((c) => c.name === 'Globex')!.id
+    await jane.signIn('jane@acme.com')
+    await sam.signIn('sam@globex.com')
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    config.emailProvider = 'smtp'
+    config.smtpUser = 'sender@gmail.com'
+    setMailTransportForTests({ sendMail: async (m) => { mails.push(m); return {} } })
+  })
+
+  it('submits a report without a video straight away', async () => {
+    const r = await jane.json('POST', '/api/reports', { title: 'No video bug', description: 'text only', withVideo: false })
+    assert.equal(r.status, 201)
+    assert.equal(r.data.upload, undefined)
+    assert.equal(r.data.report.hasVideo, false)
+    assert.equal(r.data.report.kind, 'Bug')
+    assert.equal(r.data.report.history[0].text, 'Report submitted')
+    const mine = (await jane.json('GET', '/api/reports')).data.reports as Json[]
+    assert.ok(mine.some((x) => x.id === r.data.report.id), 'visible to the client at once')
+    assert.ok(((await admin.json('GET', '/api/reports')).data.reports as Json[]).some((x) => x.id === r.data.report.id), 'visible to the admin')
+    assert.ok(mails.some((m) => /No video bug/.test(m.subject) && m.to.includes('admin@test.com')), 'admin emailed')
+    assert.ok(mails.some((m) => /We received/.test(m.subject) && m.to.includes('jane@acme.com')), 'client got a receipt')
+  })
+
+  it('cannot attach a video to a report that was already submitted', async () => {
+    const id = ((await jane.json('POST', '/api/reports', { title: 'Done already', withVideo: false })).data.report as Json).id
+    assert.equal((await upload(jane, id)).status, 409)
+    assert.equal((await jane.json('DELETE', `/api/reports/${id}`)).status, 409)
+  })
+
+  it('still hides reports whose video has not finished uploading', async () => {
+    const created = await jane.json('POST', '/api/reports', { title: 'Waiting for video' })
+    assert.ok(created.data.upload, 'video flow still returns upload info')
+    const list = (await jane.json('GET', '/api/reports')).data.reports as Json[]
+    assert.equal(list.some((x) => x.id === created.data.report.id), false)
+  })
+
+  it('puts feature requests on the roadmap as Under review, and bugs off it', async () => {
+    const feat = await jane.json('POST', '/api/reports', { title: 'Dark mode', kind: 'Feature request', withVideo: false })
+    assert.equal(feat.data.report.kind, 'Feature request')
+    assert.equal(feat.data.report.roadmapStage, 'Under review')
+    assert.match(feat.data.report.id, /^REQ-\d{4}$/)
+    const q = await jane.json('POST', '/api/reports', { title: 'How?', kind: 'Question', withVideo: false })
+    assert.match(q.data.report.id, /^Q-\d{4}$/)
+    const uat = await jane.json('POST', '/api/reports', { title: 'Found', kind: 'UAT finding', withVideo: false })
+    assert.match(uat.data.report.id, /^UAT-\d{4}$/)
+    const nums = [feat, q, uat].map((x) => Number(x.data.report.id.split('-')[1]))
+    assert.equal(new Set(nums).size, 3, 'numbers are unique across types')
+    const bug = await jane.json('POST', '/api/reports', { title: 'A bug', withVideo: false })
+    assert.equal(bug.data.report.roadmapStage, undefined)
+    assert.equal((await jane.json('POST', '/api/reports', { title: 'x', kind: 'Rant', withVideo: false })).status, 400)
+  })
+
+  it('lets only admins move items on the roadmap, notifies the client, and logs it', async () => {
+    const id = ((await jane.json('POST', '/api/reports', { title: 'Export to CSV', kind: 'Feature request', withVideo: false })).data.report as Json).id
+    assert.equal((await jane.json('PATCH', `/api/reports/${id}`, { roadmapStage: 'Done' })).status, 403)
+    assert.equal((await admin.json('PATCH', `/api/reports/${id}`, { roadmapStage: 'Someday' })).status, 400)
+    mails.length = 0
+    const moved = await admin.json('PATCH', `/api/reports/${id}`, { roadmapStage: 'Planned' })
+    assert.equal(moved.data.report.roadmapStage, 'Planned')
+    assert.ok(moved.data.report.history.some((h: Json) => /Under review to Planned/.test(h.text)))
+    assert.ok(mails.some((m) => /Planned/.test(m.subject) && m.to.includes('jane@acme.com')))
+    const off = await admin.json('PATCH', `/api/reports/${id}`, { roadmapStage: null })
+    assert.equal(off.data.report.roadmapStage, undefined)
+  })
+
+  it('lets an admin add a roadmap item for a client, visible only to that client', async () => {
+    mails.length = 0
+    const made = await admin.json('POST', '/api/admin/items', { clientId: acme, title: 'Mobile app', description: 'Q2', roadmapStage: 'In progress' })
+    assert.equal(made.status, 201)
+    const id = made.data.report.id
+    assert.equal(made.data.report.kind, 'Feature request')
+    assert.equal(made.data.report.roadmapStage, 'In progress')
+    assert.equal(made.data.report.hasVideo, false)
+    assert.ok(((await jane.json('GET', '/api/reports')).data.reports as Json[]).some((x) => x.id === id))
+    assert.equal(((await sam.json('GET', '/api/reports')).data.reports as Json[]).some((x) => x.id === id), false)
+    assert.equal((await sam.json('GET', `/api/reports/${id}`)).status, 404)
+    assert.ok(mails.some((m) => /Mobile app/.test(m.subject) && m.to.includes('jane@acme.com')), 'client users emailed, not the admin')
+    assert.equal(mails.some((m) => m.to.includes('admin@test.com') && /Mobile app/.test(m.subject)), false)
+  })
+
+  it('refuses item creation by clients and for unknown clients', async () => {
+    assert.equal((await jane.json('POST', '/api/admin/items', { clientId: acme, title: 'x' })).status, 403)
+    assert.equal((await admin.json('POST', '/api/admin/items', { clientId: 'nope', title: 'x' })).status, 404)
+    assert.equal((await admin.json('POST', '/api/admin/items', { clientId: globex, title: '' })).status, 400)
+  })
+
+  it('emails the client team when the admin replies on a team-created item', async () => {
+    const id = ((await admin.json('POST', '/api/admin/items', { clientId: acme, title: 'Reports module' })).data.report as Json).id
+    mails.length = 0
+    await admin.json('POST', `/api/reports/${id}/replies`, { text: 'Scoping this now' })
+    assert.ok(mails.some((m) => /New reply/.test(m.subject) && m.to.includes('jane@acme.com')))
+    assert.equal(mails.some((m) => m.to.includes('admin@test.com')), false, 'never emails the admin about their own reply')
+  })
+
+  it('cleans up', async () => {
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    setMailTransportForTests(null)
+    config.emailProvider = 'console'
+    config.smtpUser = ''
+  })
+})

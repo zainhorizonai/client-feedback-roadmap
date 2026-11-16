@@ -23,6 +23,12 @@ React + Vite frontend, Hono API on Vercel Functions, Postgres (Neon), videos in 
 
 Optional: set `MAX_VIDEO_MB` (default 500).
 
+## What clients and admins can do
+
+- **Clients** send a Bug, UAT finding, Feature request or Question. A video is optional. They follow each item's status, reply in its thread, and see a **Roadmap** board (Under review, Planned, In progress, Done) with their own items only.
+- **Admins** work everything in the **Tracker**, move items across the **Roadmap** board, and use **Add item** to put work on a client's roadmap themselves. Clients are emailed when their items move.
+- Feature requests land on the client's roadmap as "Under review". Bugs stay off it unless you add them.
+
 ## How uploads work on Vercel
 
 Videos never pass through a function (which caps request size). The browser asks the API for a short-lived upload token, uploads directly to Blob, then tells the API it is done. The API checks the blob exists, is a video, and is the right size before accepting it. Playback sends the browser to a signed link that expires in 5 minutes, so videos stay private and seeking works.

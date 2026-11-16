@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
-import { addReply, setStatus, updateFields } from '../lib/store'
-import { SEVERITIES, STATUSES, type Report, type Severity, type Status } from '../lib/types'
+import { addReply, setRoadmapStage, setStatus, updateFields } from '../lib/store'
+import { hasSeverity, KINDS, ROADMAP_STAGES, SEVERITIES, STATUSES, type Kind, type Report, type RoadmapStage, type Severity, type Status } from '../lib/types'
 import { VideoPlayer } from './VideoPlayer'
 import { Thread } from './Thread'
 import { btnPrimary, fmtDateTime, inputCls } from './ui'
@@ -21,7 +21,7 @@ export function ReportPanel({ report, onClose }: { report: Report; onClose: () =
       </div>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
-        <VideoPlayer reportId={report.id} hasVideo={report.hasVideo} />
+        {report.hasVideo ? <VideoPlayer reportId={report.id} hasVideo /> : <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">No video was added to this item.</p>}
         {report.description && <p className="whitespace-pre-wrap text-sm text-slate-700">{report.description}</p>}
         {report.pageUrl && <p className="break-all text-xs text-slate-500">{report.pageUrl}</p>}
 
@@ -33,9 +33,24 @@ export function ReportPanel({ report, onClose }: { report: Report; onClose: () =
             </select>
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block font-medium">Severity</span>
-            <select value={report.severity} onChange={(e) => updateFields(report.id, { severity: e.target.value as Severity })} className={inputCls}>
-              {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
+            <span className="mb-1 block font-medium">Type</span>
+            <select value={report.kind} onChange={(e) => updateFields(report.id, { kind: e.target.value as Kind })} className={inputCls}>
+              {KINDS.map((k) => <option key={k}>{k}</option>)}
+            </select>
+          </label>
+          {hasSeverity(report.kind) && (
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Severity</span>
+              <select value={report.severity} onChange={(e) => updateFields(report.id, { severity: e.target.value as Severity })} className={inputCls}>
+                {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </label>
+          )}
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Client roadmap</span>
+            <select value={report.roadmapStage ?? ''} onChange={(e) => setRoadmapStage(report.id, e.target.value === '' ? null : (e.target.value as RoadmapStage))} className={inputCls}>
+              <option value="">Not on the roadmap</option>
+              {ROADMAP_STAGES.map((s) => <option key={s}>{s}</option>)}
             </select>
           </label>
         </div>

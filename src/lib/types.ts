@@ -6,6 +6,15 @@ export type Status = (typeof STATUSES)[number]
 export const SEVERITIES = ['Low', 'Medium', 'High', 'Blocker'] as const
 export type Severity = (typeof SEVERITIES)[number]
 
+export const KINDS = ['Bug', 'UAT finding', 'Feature request', 'Question'] as const
+export type Kind = (typeof KINDS)[number]
+
+export const ROADMAP_STAGES = ['Under review', 'Planned', 'In progress', 'Done'] as const
+export type RoadmapStage = (typeof ROADMAP_STAGES)[number]
+
+/** Bugs and UAT findings have a severity. Requests and questions do not. */
+export const hasSeverity = (k: Kind) => k === 'Bug' || k === 'UAT finding'
+
 export interface User {
   id: string
   email: string
@@ -40,6 +49,9 @@ export interface Report {
   pageUrl: string
   severity: Severity
   status: Status
+  kind: Kind
+  /** Present when the item is on the client's roadmap. */
+  roadmapStage?: RoadmapStage
   /** Internal notes. The server only sends this to admins. */
   notes?: string
   /** Resolution video link, shown to the client */

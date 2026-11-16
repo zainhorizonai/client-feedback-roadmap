@@ -5,7 +5,8 @@ import { useAuth } from '../lib/auth'
 import { addClientComment, clientConfirm, useReports, useReportsLoaded } from '../lib/store'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { Thread } from '../components/Thread'
-import { btnPrimary, btnSecondary, fmtDate, inputCls, SeverityChip, StatusBadge } from '../components/ui'
+import { hasSeverity } from '../lib/types'
+import { btnPrimary, btnSecondary, fmtDate, inputCls, KindChip, SeverityChip, StageBadge, StatusBadge } from '../components/ui'
 
 export function ReportDetail() {
   const { id } = useParams()
@@ -21,14 +22,14 @@ export function ReportDetail() {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         <h1 className="text-xl font-semibold">Report not found</h1>
-        <Link to="/reports" className={`${btnSecondary} mt-4`}>Back to my reports</Link>
+        <Link to="/reports" className={`${btnSecondary} mt-4`}>Back to my items</Link>
       </div>
     )
   }
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-      <Link to="/reports" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /> My reports</Link>
+      <Link to="/reports" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /> My items</Link>
       <div className="mb-6">
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
           <span className="font-mono">{report.id}</span><span>·</span><span>{fmtDate(report.createdAt)}</span>
@@ -36,13 +37,15 @@ export function ReportDetail() {
         <div className="mt-1 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold">{report.title}</h1>
           <StatusBadge status={report.status} />
-          <SeverityChip severity={report.severity} />
+          <KindChip kind={report.kind} />
+          {hasSeverity(report.kind) && <SeverityChip severity={report.severity} />}
+          {report.roadmapStage && <StageBadge stage={report.roadmapStage} />}
         </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="space-y-5 lg:col-span-3">
-          <VideoPlayer reportId={report.id} hasVideo={report.hasVideo} />
+          {report.hasVideo && <VideoPlayer reportId={report.id} hasVideo />}
           {report.description && <p className="whitespace-pre-wrap text-slate-700">{report.description}</p>}
           {report.pageUrl && <p className="flex items-center gap-1 text-sm text-slate-500"><ExternalLink className="h-3.5 w-3.5" /> {report.pageUrl}</p>}
 

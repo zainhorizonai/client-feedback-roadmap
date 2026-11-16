@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Download, Play, Search } from 'lucide-react'
-import { setStatus, updateFields, useReports } from '../lib/store'
-import { SEVERITIES, STATUSES, type Report, type Severity, type Status } from '../lib/types'
+import { setRoadmapStage, setStatus, updateFields, useReports } from '../lib/store'
+import { hasSeverity, KINDS, ROADMAP_STAGES, SEVERITIES, STATUSES, type Kind, type Report, type RoadmapStage, type Severity, type Status } from '../lib/types'
 import { EditableText } from '../components/EditableText'
 import { ReportPanel } from '../components/ReportPanel'
 import { btnSecondary, fmtDate, inputCls } from '../components/ui'
@@ -20,8 +20,8 @@ function csvCell(v: string) {
 }
 
 function exportCsv(rows: Report[]) {
-  const head = ['ID', 'Date', 'Client', 'Reporter', 'Title', 'Description', 'Page URL', 'Severity', 'Status', 'Notes', 'Resolution video', 'Resolved date']
-  const body = rows.map((r) => [r.id, r.createdAt, r.clientName, r.reporterName, r.title, r.description, r.pageUrl, r.severity, r.status, r.notes ?? '', r.resolutionUrl, r.resolvedAt ?? ''].map(csvCell).join(','))
+  const head = ['ID', 'Date', 'Type', 'Client', 'Reporter', 'Title', 'Description', 'Page URL', 'Severity', 'Status', 'Roadmap', 'Notes', 'Resolution video', 'Resolved date']
+  const body = rows.map((r) => [r.id, r.createdAt, r.kind, r.clientName, r.reporterName, r.title, r.description, r.pageUrl, r.severity, r.status, r.roadmapStage ?? '', r.notes ?? '', r.resolutionUrl, r.resolvedAt ?? ''].map(csvCell).join(','))
   const url = URL.createObjectURL(new Blob([[head.map(csvCell).join(','), ...body].join('\n')], { type: 'text/csv' }))
   const a = document.createElement('a')
   a.href = url
@@ -41,6 +41,7 @@ export function AdminTracker() {
   const [client, setClient] = useState('')
   const [status, setStatusFilter] = useState('')
   const [severity, setSeverityFilter] = useState('')
+  const [kind, setKindFilter] = useState('')
   const [params, setParams] = useSearchParams()
   const openId = params.get('report')
   const setOpenId = (id: string | null) => setParams(id ? { report: id } : {}, { replace: true })
@@ -49,10 +50,10 @@ export function AdminTracker() {
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return reports
-      .filter((r) => (!client || r.clientName === client) && (!status || r.status === status) && (!severity || r.severity === severity))
+      .filter((r) => (!client || r.clientName === client) && (!status || r.status === status) && (!severity || r.severity === severity) && (!kind || r.kind === kind))
       .filter((r) => !needle || [r.id, r.title, r.description, r.reporterName, r.clientName, r.notes ?? ''].some((f) => f.toLowerCase().includes(needle)))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  }, [reports, q, client, status, severity])
+  }, [reports, q, client, status, severity, kind])
 
   const counts = useMemo(() => {
     const c = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<Status, number>
@@ -91,6 +92,10 @@ export function AdminTracker() {
           <option value="">All statuses</option>
           {STATUSES.map((s) => <option key={s}>{s}</option>)}
         </select>
+        <select value={kind} onChange={(e) => setKindFilter(e.target.value)} className={`${filterCls}`}>
+          <option value="">All types</option>
+          {KINDS.map((k) => <option key={k}>{k}</option>)}
+        </select>
         <select value={severity} onChange={(e) => setSeverityFilter(e.target.value)} className={`${filterCls}`}>
           <option value="">All severities</option>
           {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
@@ -98,17 +103,17 @@ export function AdminTracker() {
       </div>
 
       <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[1200px] table-fixed border-collapse text-sm">
+        <table className="w-full min-w-[1450px] table-fixed border-collapse text-sm">
           <colgroup>
-            <col className="w-24" /><col className="w-28" /><col className="w-32" /><col className="w-32" />
+            <col className="w-24" /><col className="w-28" /><col className="w-36" /><col className="w-32" /><col className="w-32" />
             <col className="w-64" /><col className="w-56" /><col className="w-16" /><col className="w-28" />
-            <col className="w-36" /><col className="w-52" /><col className="w-28" />
+            <col className="w-36" /><col className="w-36" /><col className="w-52" /><col className="w-28" />
           </colgroup>
           <thead>
             <tr>
-              <th className={th}>ID</th><th className={th}>Date</th><th className={th}>Client</th><th className={th}>Reporter</th>
+              <th className={th}>ID</th><th className={th}>Date</th><th className={th}>Type</th><th className={th}>Client</th><th className={th}>Reporter</th>
               <th className={th}>Title</th><th className={th}>Page / URL</th><th className={th}>Video</th><th className={th}>Severity</th>
-              <th className={th}>Status</th><th className={th}>Notes</th><th className={th}>Resolved</th>
+              <th className={th}>Status</th><th className={th}>Roadmap</th><th className={th}>Notes</th><th className={th}>Resolved</th>
             </tr>
           </thead>
           <tbody>
@@ -116,6 +121,11 @@ export function AdminTracker() {
               <tr key={r.id} className={`border-l-4 hover:bg-slate-50/70 ${STATUS_ROW[r.status]} ${openId === r.id ? 'bg-brand-50/50' : ''}`}>
                 <td className={`${td} px-2 font-mono text-xs text-slate-600`}>{r.id}</td>
                 <td className={`${td} px-2 text-slate-600`}>{fmtDate(r.createdAt)}</td>
+                <td className={td}>
+                  <select value={r.kind} onChange={(e) => updateFields(r.id, { kind: e.target.value as Kind })} className={cellSelect}>
+                    {KINDS.map((k) => <option key={k}>{k}</option>)}
+                  </select>
+                </td>
                 <td className={`${td} px-2`}>{r.clientName}</td>
                 <td className={`${td} px-2 text-slate-600`}>{r.reporterName}</td>
                 <td className={td}><EditableText value={r.title} onSave={(v) => updateFields(r.id, { title: v })} className="font-medium" /></td>
@@ -126,13 +136,21 @@ export function AdminTracker() {
                   </button>
                 </td>
                 <td className={td}>
-                  <select value={r.severity} onChange={(e) => updateFields(r.id, { severity: e.target.value as Severity })} className={cellSelect}>
-                    {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
-                  </select>
+                  {hasSeverity(r.kind) ? (
+                    <select value={r.severity} onChange={(e) => updateFields(r.id, { severity: e.target.value as Severity })} className={cellSelect}>
+                      {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
+                    </select>
+                  ) : <span className="px-1 text-slate-300">—</span>}
                 </td>
                 <td className={td}>
                   <select value={r.status} onChange={(e) => setStatus(r.id, e.target.value as Status)} className={`${cellSelect} font-medium`}>
                     {STATUSES.map((s) => <option key={s}>{s}</option>)}
+                  </select>
+                </td>
+                <td className={td}>
+                  <select value={r.roadmapStage ?? ''} onChange={(e) => setRoadmapStage(r.id, e.target.value === '' ? null : (e.target.value as RoadmapStage))} className={cellSelect}>
+                    <option value="">—</option>
+                    {ROADMAP_STAGES.map((s) => <option key={s}>{s}</option>)}
                   </select>
                 </td>
                 <td className={td}><EditableText value={r.notes ?? ''} onSave={(v) => updateFields(r.id, { notes: v })} placeholder="Add note" /></td>
@@ -140,7 +158,7 @@ export function AdminTracker() {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={11} className="py-16 text-center text-slate-500">No reports match these filters.</td></tr>
+              <tr><td colSpan={13} className="py-16 text-center text-slate-500">No reports match these filters.</td></tr>
             )}
           </tbody>
         </table>

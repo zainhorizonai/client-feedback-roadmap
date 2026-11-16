@@ -13,7 +13,12 @@ export const app = new Hono<Env>()
 
 const STATUSES = ['New', 'Triaging', 'In progress', 'Ready to verify', 'Resolved'] as const
 const SEVERITIES = ['Low', 'Medium', 'High', 'Blocker'] as const
+const KINDS = ['Bug', 'UAT finding', 'Feature request', 'Question'] as const
+const STAGES = ['Under review', 'Planned', 'In progress', 'Done'] as const
 type Status = (typeof STATUSES)[number]
+type Kind = (typeof KINDS)[number]
+// The number is shared across all types, so BUG-0003 and REQ-0004 can never collide.
+const ID_PREFIX: Record<Kind, string> = { Bug: 'BUG', 'UAT finding': 'UAT', 'Feature request': 'REQ', Question: 'Q' }
 
 // ---------- helpers ----------
 
@@ -80,10 +85,11 @@ interface ReportRow {
   reporter_id: string; reporter_name: string; reporter_email: string
   title: string; description: string; page_url: string; severity: string; status: Status
   notes: string; resolution_url: string; video_path: string | null; video_mime: string | null; resolved_at: string | null
+  kind: Kind; roadmap_stage: string | null; submitted_at: string | null; reporter_role: 'admin' | 'client'
 }
 interface HistoryRow { report_id: string; at: string; by: string; kind: string; text: string }
 
-const REPORT_SELECT = `SELECT r.*, c.name AS client_name, u.name AS reporter_name, u.email AS reporter_email
+const REPORT_SELECT = `SELECT r.*, c.name AS client_name, u.name AS reporter_name, u.email AS reporter_email, u.role AS reporter_role
   FROM reports r JOIN clients c ON c.id = r.client_id JOIN users u ON u.id = r.reporter_id`
 
 function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[]) {
@@ -99,6 +105,8 @@ function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[]) {
     pageUrl: r.page_url,
     severity: r.severity,
     status: r.status,
+    kind: r.kind,
+    roadmapStage: r.roadmap_stage ?? undefined,
     // Internal notes never leave the server for clients.
     ...(user.role === 'admin' ? { notes: r.notes } : {}),
     resolutionUrl: r.resolution_url,
@@ -148,12 +156,17 @@ async function mailAdmins(subject: string, lines: string[], id: string) {
     html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'Open in tracker', url: adminLink(id) }),
   })
 }
-const mailClient = (r: ReportRow, subject: string, lines: string[]) =>
+/** Whoever sent the item gets the email. Items added by the team go to everyone at that client. */
+async function clientRecipients(r: ReportRow): Promise<string[]> {
+  if (r.reporter_role === 'client') return [r.reporter_email]
+  return (await all<{ email: string }>("SELECT email FROM users WHERE role = 'client' AND client_id = $1", r.client_id)).map((u) => u.email)
+}
+const mailClient = async (r: ReportRow, subject: string, lines: string[]) =>
   sendQuietly({
-    to: r.reporter_email,
+    to: await clientRecipients(r),
     subject,
-    text: `Hi ${r.reporter_name},\n\n${lines.join('\n')}\n\n${clientLink(r.id)}`,
-    html: layout(subject, `<p>Hi ${escapeHtml(r.reporter_name)},</p>${lines.map((l) => `<p>${escapeHtml(l)}</p>`).join('')}`, { label: 'View report', url: clientLink(r.id) }),
+    text: `Hello,\n\n${lines.join('\n')}\n\n${clientLink(r.id)}`,
+    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'View it', url: clientLink(r.id) }),
   })
 
 // ---------- middleware ----------
@@ -276,10 +289,10 @@ app.post('/api/auth/logout', async (c) => {
 
 app.get('/api/reports', async (c) => {
   const user = requireUser(c)
-  // Reports with no video yet are unfinished drafts and stay hidden.
+  // Reports still waiting for their video to finish uploading are drafts and stay hidden.
   const rows = user.role === 'admin'
-    ? await all<ReportRow>(`${REPORT_SELECT} WHERE r.video_path IS NOT NULL ORDER BY r.seq DESC`)
-    : await all<ReportRow>(`${REPORT_SELECT} WHERE r.video_path IS NOT NULL AND r.client_id = $1 ORDER BY r.seq DESC`, user.clientId)
+    ? await all<ReportRow>(`${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL ORDER BY r.seq DESC`)
+    : await all<ReportRow>(`${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL AND r.client_id = $1 ORDER BY r.seq DESC`, user.clientId)
   const hist = await historyFor(rows.map((r) => r.id))
   return c.json({ reports: rows.map((r) => serialize(r, user, hist.get(r.id) ?? [])) })
 })
@@ -289,6 +302,38 @@ app.get('/api/reports/:id', async (c) => {
   return c.json({ report: await withHistory(await loadReport(user, c.req.param('id')), user) })
 })
 
+/** Numbers are sequential (BUG-0001...). Two requests can pick the same next number; the unique
+ *  constraint rejects the loser, which simply retries. */
+async function insertReport(f: {
+  clientId: string; reporterId: string; title: string; description: string; pageUrl: string
+  severity: string; kind: Kind; stage: string | null; submittedAt: string | null
+}): Promise<string> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      const row = await one<{ id: string }>(
+        `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity, kind, roadmap_stage, submitted_at)
+         SELECT $11::text || '-' || LPAD(n::text, 4, '0'), n, $1, $2, $3, $4, $5, $6, $7, $8, $9::text, $10::text
+           FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM reports) s
+         RETURNING id`,
+        now(), f.clientId, f.reporterId, f.title, f.description, f.pageUrl, f.severity, f.kind, f.stage, f.submittedAt, ID_PREFIX[f.kind],
+      )
+      if (row) return row.id
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e
+    }
+  }
+  throw new HttpError(409, 'Could not create the item, please try again')
+}
+
+// Feature requests start on the client's roadmap as "Under review". Everything else starts off it.
+const defaultStage = (kind: Kind) => (kind === 'Feature request' ? 'Under review' : null)
+
+async function announceSubmission(r: ReportRow) {
+  const what = r.kind === 'Bug' || r.kind === 'UAT finding' ? `${r.severity} ${r.kind.toLowerCase()}` : r.kind.toLowerCase()
+  await mailAdmins(`New ${what} from ${r.client_name}: ${r.title}`, [`${r.reporter_name} (${r.client_name}) submitted ${r.id} (${r.kind}).`, ...(r.kind === 'Bug' || r.kind === 'UAT finding' ? [`Severity: ${r.severity}`] : []), r.description], r.id)
+  await mailClient(r, `We received your ${r.kind.toLowerCase()} ${r.id}`, [`Thanks, we received "${r.title}" and will update you here and by email.`])
+}
+
 app.post('/api/reports', async (c) => {
   const user = requireClient(c)
   const body = await json(c)
@@ -296,43 +341,37 @@ app.post('/api/reports', async (c) => {
   const description = text(body.description, 'description', 4000)
   const pageUrl = text(body.pageUrl, 'pageUrl', 500)
   const severity = oneOf(body.severity ?? 'Medium', SEVERITIES, 'severity')
+  const kind = oneOf(body.kind ?? 'Bug', KINDS, 'kind')
+  // A video is optional. Without one the report is complete straight away; with one it stays a hidden
+  // draft until the upload finishes.
+  const withVideo = body.withVideo !== false
   const storage = getStorage()
 
-  // Numbers are sequential (BUG-0001...). Two requests can pick the same next number; the unique
-  // constraint rejects the loser, which simply retries.
-  let id: string | undefined
-  for (let attempt = 0; attempt < 6 && !id; attempt++) {
-    try {
-      const row = await one<{ id: string }>(
-        `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity)
-         SELECT 'BUG-' || LPAD(n::text, 4, '0'), n, $1, $2, $3, $4, $5, $6, $7
-           FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM reports) s
-         RETURNING id`,
-        now(), user.clientId, user.id, title, description, pageUrl, severity,
-      )
-      id = row?.id
-    } catch (e) {
-      if (!isUniqueViolation(e)) throw e
-    }
+  const id = await insertReport({
+    clientId: user.clientId!, reporterId: user.id, title, description, pageUrl, severity, kind,
+    stage: defaultStage(kind), submittedAt: withVideo ? null : now(),
+  })
+  if (!withVideo) {
+    await addHistory(id, 'client', 'created', 'Report submitted')
+    await announceSubmission(await loadReport(user, id))
   }
-  if (!id) throw new HttpError(409, 'Could not create the report, please try again')
-  return c.json({ report: await withHistory(await loadReport(user, id), user), upload: { mode: storage.mode, flow: storage.uploadFlow } }, 201)
+  const report = await withHistory(await loadReport(user, id), user)
+  return c.json({ report, upload: withVideo ? { mode: storage.mode, flow: storage.uploadFlow } : undefined }, 201)
 })
 
 /** Marks a draft as submitted. One atomic statement, so a report can only be finalized once. */
 async function finalizeUpload(user: AuthUser, r: ReportRow, storedPath: string, mime: string, size: number) {
   const done = await one(
     `WITH u AS (
-       UPDATE reports SET video_path = $2, video_mime = $3, video_size = $4
-        WHERE id = $1 AND video_path IS NULL RETURNING id)
+       UPDATE reports SET video_path = $2, video_mime = $3, video_size = $4, submitted_at = $5
+        WHERE id = $1 AND submitted_at IS NULL RETURNING id)
      INSERT INTO history (report_id, at, by, kind, text)
      SELECT id, $5, 'client', 'created', 'Report submitted' FROM u RETURNING report_id`,
     r.id, storedPath, mime, size, now(),
   )
   if (!done) throw new HttpError(409, 'This report already has a video')
 
-  await mailAdmins(`New ${r.severity} report from ${r.client_name}: ${r.title}`, [`${r.reporter_name} (${r.client_name}) submitted ${r.id}.`, `Severity: ${r.severity}`, r.description], r.id)
-  await mailClient(r, `We received your report ${r.id}`, [`Thanks, we received "${r.title}" and will update you here and by email.`])
+  await announceSubmission(r)
   return withHistory(await loadReport(user, r.id), user)
 }
 
@@ -340,7 +379,7 @@ async function ownDraft(c: Context<Env>) {
   const user = requireClient(c)
   const r = await loadReport(user, c.req.param('id')!)
   if (r.reporter_id !== user.id) throw new HttpError(403, 'Only the reporter can upload the video')
-  if (r.video_path !== null) throw new HttpError(409, 'This report already has a video')
+  if (r.submitted_at !== null) throw new HttpError(409, 'This report has already been submitted')
   return { user, r }
 }
 
@@ -417,7 +456,7 @@ app.delete('/api/reports/:id', async (c) => {
   const user = requireClient(c)
   const r = await loadReport(user, c.req.param('id'))
   if (r.reporter_id !== user.id) throw new HttpError(403, 'Not your report')
-  if (r.video_path !== null) throw new HttpError(409, 'Submitted reports cannot be deleted')
+  if (r.submitted_at !== null) throw new HttpError(409, 'Submitted reports cannot be deleted')
   await run('DELETE FROM reports WHERE id = $1', r.id)
   return c.json({ ok: true })
 })
@@ -435,6 +474,7 @@ app.patch('/api/reports/:id', async (c) => {
   if ('description' in body) set('description', text(body.description, 'description', 4000))
   if ('pageUrl' in body) set('page_url', text(body.pageUrl, 'pageUrl', 500))
   if ('severity' in body) set('severity', oneOf(body.severity, SEVERITIES, 'severity'))
+  if ('kind' in body) set('kind', oneOf(body.kind, KINDS, 'kind'))
   if ('notes' in body) set('notes', text(body.notes, 'notes', 4000))
   if ('resolutionUrl' in body) set('resolution_url', httpUrlOrEmpty(body.resolutionUrl, 'resolutionUrl'))
 
@@ -447,16 +487,24 @@ app.patch('/api/reports/:id', async (c) => {
     } else newStatus = null
   }
 
+  // roadmapStage: a stage puts the item on the client's roadmap, null takes it off.
+  let newStage: string | null | undefined
+  if ('roadmapStage' in body) {
+    const next = body.roadmapStage === null || body.roadmapStage === '' ? null : oneOf(body.roadmapStage, STAGES, 'roadmapStage')
+    if (next !== r.roadmap_stage) { newStage = next; set('roadmap_stage', next) }
+  }
+
   if (sets.length) {
     const update: [string, (string | null)[]] = [`UPDATE reports SET ${sets.join(', ')} WHERE id = $${vals.length + 1}`, [...vals, r.id]]
-    if (newStatus) {
-      await batch([
-        update,
-        ['INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', [r.id, now(), 'admin', 'status', `Status changed from ${r.status} to ${newStatus}`]],
-      ])
-    } else {
-      await run(update[0], ...update[1])
-    }
+    const stmts: [string, (string | null)[]][] = [update]
+    const log = (msg: string) => stmts.push(['INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', [r.id, now(), 'admin', 'status', msg]])
+    if (newStatus) log(`Status changed from ${r.status} to ${newStatus}`)
+    if (newStage !== undefined) log(newStage ? `Roadmap: ${r.roadmap_stage ?? 'not on the roadmap'} to ${newStage}` : 'Removed from the roadmap')
+    if (stmts.length > 1) await batch(stmts)
+    else await run(update[0], ...update[1])
+  }
+  if (newStage) {
+    await mailClient(r, `${r.id} is now "${newStage}" on your roadmap`, [`"${r.title}" moved to ${newStage} on your roadmap.`])
   }
   if (newStatus) {
     await mailClient(r, `${r.id} is now "${newStatus}"`, [`The status of "${r.title}" changed from ${r.status} to ${newStatus}.`])
@@ -498,6 +546,25 @@ app.post('/api/reports/:id/confirm', async (c) => {
   ])
   await mailAdmins(fixed ? `${r.id} confirmed fixed by ${r.client_name}` : `${r.id} is still broken (${r.client_name})`, [msg], r.id)
   return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
+})
+
+// ---------- admin: add an item for a client (roadmap, future work) ----------
+
+app.post('/api/admin/items', async (c) => {
+  const admin = requireAdmin(c)
+  const body = await json(c)
+  const clientId = text(body.clientId, 'clientId', 100, true)
+  if (!(await one('SELECT id FROM clients WHERE id = $1', clientId))) throw new HttpError(404, 'Client not found')
+  const kind = oneOf(body.kind ?? 'Feature request', KINDS, 'kind')
+  const stage = body.roadmapStage === null ? null : oneOf(body.roadmapStage ?? 'Planned', STAGES, 'roadmapStage')
+  const id = await insertReport({
+    clientId, reporterId: admin.id, title: text(body.title, 'title', 120, true), description: text(body.description, 'description', 4000),
+    pageUrl: '', severity: 'Medium', kind, stage, submittedAt: now(),
+  })
+  await addHistory(id, 'admin', 'created', 'Added by the team')
+  const r = await loadReport(admin, id)
+  if (stage) await mailClient(r, `New on your roadmap: ${r.title}`, [`We added "${r.title}" to your roadmap (${stage}).`])
+  return c.json({ report: await withHistory(r, admin) }, 201)
 })
 
 // ---------- admin: clients and their users ----------
@@ -543,7 +610,7 @@ app.post('/api/admin/clients/:id/users', async (c) => {
 
 export async function housekeeping() {
   const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString()
-  await run('DELETE FROM reports WHERE video_path IS NULL AND created_at < $1', cutoff)
+  await run('DELETE FROM reports WHERE submitted_at IS NULL AND created_at < $1', cutoff)
   await run('DELETE FROM login_tokens WHERE expires_at < $1', now())
   await run('DELETE FROM sessions WHERE expires_at < $1', now())
   await run('DELETE FROM rate_hits WHERE at < $1', new Date(Date.now() - 3600_000).toISOString())

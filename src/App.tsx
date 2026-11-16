@@ -8,6 +8,8 @@ import { NewReport } from './pages/NewReport'
 import { ReportDetail } from './pages/ReportDetail'
 import { AdminTracker } from './pages/AdminTracker'
 import { AdminClients } from './pages/AdminClients'
+import { AdminRoadmap } from './pages/AdminRoadmap'
+import { ClientRoadmap } from './pages/ClientRoadmap'
 
 function Routed() {
   const { user, loading } = useAuth()
@@ -28,11 +30,13 @@ function Routed() {
         {user.role === 'admin' ? (
           <>
             <Route path="/admin" element={<AdminTracker />} />
+            <Route path="/admin/roadmap" element={<AdminRoadmap />} />
             <Route path="/admin/clients" element={<AdminClients />} />
           </>
         ) : (
           <>
             <Route path="/reports" element={<ClientReports />} />
+            <Route path="/roadmap" element={<ClientRoadmap />} />
             <Route path="/reports/new" element={<NewReport />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
           </>
