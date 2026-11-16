@@ -1,78 +1,74 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Building2, Plus, UserPlus } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useProject } from '../lib/project'
 import { notify } from '../lib/toast'
-import type { ClientOrg } from '../lib/types'
-import { btnPrimary, btnSecondary, inputCls } from '../components/ui'
+import { Button, EmptyState, Field, PageHeader, Skeleton } from '../components/ui'
 
 export function AdminClients() {
-  const [clients, setClients] = useState<ClientOrg[] | null>(null)
+  const { projects, reload, loaded } = useProject()
   const [name, setName] = useState('')
+  const [adding, setAdding] = useState(false)
   const [inviting, setInviting] = useState<string | null>(null)
   const [uName, setUName] = useState('')
   const [uEmail, setUEmail] = useState('')
+  const [sending, setSending] = useState(false)
 
-  const load = useCallback(async () => {
-    try { setClients((await api.get<{ clients: ClientOrg[] }>('/api/admin/clients')).clients) }
-    catch (e) { notify(e instanceof ApiError ? e.message : 'Could not load clients', 'error') }
-  }, [])
-  useEffect(() => { load() }, [load])
-
-  async function addClient(e: React.FormEvent) {
+  async function addProject(e: React.FormEvent) {
     e.preventDefault()
-    try {
-      await api.post('/api/admin/clients', { name })
-      setName('')
-      await load()
-    } catch (err) { notify(err instanceof ApiError ? err.message : 'Failed', 'error') }
+    setAdding(true)
+    try { await api.post('/api/admin/clients', { name }); setName(''); await reload(); notify('Project added.') }
+    catch (err) { notify(err instanceof ApiError ? err.message : 'Could not add the project', 'error') }
+    finally { setAdding(false) }
   }
 
   async function invite(e: React.FormEvent, clientId: string) {
     e.preventDefault()
+    setSending(true)
     try {
       const r = await api.post<{ emailSent?: boolean }>(`/api/admin/clients/${clientId}/users`, { name: uName, email: uEmail })
-      if (r.emailSent === false) notify(`${uEmail} was added, but the invitation email could not be sent. They can still sign in from the home page once email is working.`, 'error')
+      if (r.emailSent === false) notify(`${uEmail} was added, but the invitation email could not be sent. They can still sign in from the sign-in page.`, 'error')
       else notify(`Invitation sent to ${uEmail}.`)
       setUName(''); setUEmail(''); setInviting(null)
-      await load()
-    } catch (err) { notify(err instanceof ApiError ? err.message : 'Failed', 'error') }
+      await reload()
+    } catch (err) { notify(err instanceof ApiError ? err.message : 'Could not send the invitation', 'error') }
+    finally { setSending(false) }
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-      <h1 className="text-2xl font-semibold">Clients</h1>
-      <p className="mt-1 text-sm text-slate-600">Each client only ever sees their own reports. Invited people sign in with their email.</p>
+    <div className="max-w-3xl">
+      <PageHeader title="Projects and people" subtitle="Each project only ever sees its own reports and published roadmap items. Invited people sign in with their email." />
 
-      <form onSubmit={addClient} className="mt-6 flex gap-2">
-        <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="New client name" className={inputCls} />
-        <button className={btnPrimary} type="submit"><Plus className="h-4 w-4" /> Add client</button>
+      <form onSubmit={addProject} className="mb-6 flex flex-wrap items-end gap-2">
+        <Field label="New project" className="min-w-[14rem] flex-1"><input required className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Project or client name" /></Field>
+        <Button type="submit" pending={adding} disabled={!name.trim()}><Plus className="h-4 w-4" aria-hidden="true" />Add project</Button>
       </form>
 
-      <div className="mt-6 space-y-4">
-        {clients === null && <p className="text-sm text-slate-500">Loading…</p>}
-        {clients?.length === 0 && <p className="text-sm text-slate-500">No clients yet. Add one above, then invite their lead.</p>}
-        {clients?.map((c) => (
-          <section key={c.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="flex items-center gap-2 font-semibold"><Building2 className="h-4 w-4 text-slate-400" /> {c.name}</h2>
-              <button className={btnSecondary} onClick={() => setInviting(inviting === c.id ? null : c.id)}><UserPlus className="h-4 w-4" /> Invite person</button>
-            </div>
-            <ul className="mt-3 divide-y divide-slate-100 text-sm">
-              {c.users.length === 0 && <li className="py-2 text-slate-500">No one invited yet.</li>}
-              {c.users.map((u) => (
-                <li key={u.id} className="flex justify-between py-2"><span className="font-medium">{u.name}</span><span className="text-slate-500">{u.email}</span></li>
-              ))}
-            </ul>
-            {inviting === c.id && (
-              <form onSubmit={(e) => invite(e, c.id)} className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                <input required value={uName} onChange={(e) => setUName(e.target.value)} placeholder="Full name" className={inputCls} />
-                <input required type="email" value={uEmail} onChange={(e) => setUEmail(e.target.value)} placeholder="email@client.com" className={inputCls} />
-                <button className={btnPrimary} type="submit">Send invite</button>
-              </form>
-            )}
-          </section>
-        ))}
-      </div>
+      {!loaded ? <Skeleton rows={3} /> : projects.length === 0 ? (
+        <EmptyState icon={<Building2 className="h-9 w-9" />} title="No projects yet">Add a project above, then invite the people who will send you feedback.</EmptyState>
+      ) : (
+        <div className="space-y-4">
+          {projects.map((p) => (
+            <section key={p.id} aria-labelledby={`p-${p.id}`} className="rounded-card border border-line bg-surface p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id={`p-${p.id}`} className="flex items-center gap-2 font-semibold"><Building2 className="h-4 w-4 text-muted" aria-hidden="true" />{p.name}</h2>
+                <Button variant="secondary" onClick={() => setInviting(inviting === p.id ? null : p.id)} aria-expanded={inviting === p.id}><UserPlus className="h-4 w-4" aria-hidden="true" />Invite person</Button>
+              </div>
+              <ul className="mt-3 divide-y divide-line">
+                {p.users.length === 0 && <li className="py-2 text-muted">No one invited yet.</li>}
+                {p.users.map((u) => <li key={u.id} className="flex flex-wrap justify-between gap-x-4 py-2"><span className="font-semibold">{u.name}</span><span className="break-all text-muted">{u.email}</span></li>)}
+              </ul>
+              {inviting === p.id && (
+                <form onSubmit={(e) => invite(e, p.id)} className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                  <Field label="Full name" required><input required className="input" value={uName} onChange={(e) => setUName(e.target.value)} autoFocus /></Field>
+                  <Field label="Email" required><input required type="email" className="input" value={uEmail} onChange={(e) => setUEmail(e.target.value)} /></Field>
+                  <Button type="submit" pending={sending}>Send invitation</Button>
+                </form>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

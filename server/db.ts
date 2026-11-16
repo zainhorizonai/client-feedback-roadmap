@@ -81,7 +81,29 @@ const SCHEMA = [
     ok INTEGER NOT NULL,
     error TEXT NOT NULL DEFAULT ''
   )`,
+  // Roadmap items are their own records. A client only sees the ones published to their project, and an
+  // item can link to several reports without exposing them. Moving an item never changes a report.
+  `CREATE TABLE IF NOT EXISTS roadmap_items (
+    id TEXT PRIMARY KEY,
+    seq INTEGER NOT NULL UNIQUE,
+    client_id TEXT NOT NULL REFERENCES clients(id),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'Under review',
+    target_window TEXT NOT NULL DEFAULT '',
+    client_update TEXT NOT NULL DEFAULT '',
+    published INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS roadmap_links (
+    item_id TEXT NOT NULL REFERENCES roadmap_items(id) ON DELETE CASCADE,
+    report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    PRIMARY KEY (item_id, report_id)
+  )`,
   // Added after launch. Idempotent, so existing databases upgrade themselves on the next start.
+  'ALTER TABLE history ADD COLUMN IF NOT EXISTS from_value TEXT',
+  'ALTER TABLE history ADD COLUMN IF NOT EXISTS to_value TEXT',
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS submitted_at TEXT',
   "ALTER TABLE reports ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'Bug'",
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS roadmap_stage TEXT',
@@ -118,6 +140,31 @@ async function createDriver(): Promise<Driver> {
   }
 }
 
+/**
+ * Earlier versions kept a roadmap stage on the report itself. Turn each into a published roadmap item linked
+ * to that report, then clear the old field so this only ever runs once per report.
+ */
+export async function migrateLegacyRoadmap(d: Pick<Driver, 'query' | 'batch'>) {
+  const rows = await d.query(
+    'SELECT id, client_id, title, description, roadmap_stage, created_at FROM reports WHERE roadmap_stage IS NOT NULL ORDER BY seq',
+    [],
+  )
+  for (const r of rows) {
+    const next = (await d.query('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM roadmap_items', []))[0]?.n as number
+    const itemId = `RM-${String(next).padStart(4, '0')}`
+    const at = String(r.created_at)
+    await d.batch([
+      [
+        `INSERT INTO roadmap_items (id, seq, client_id, title, description, state, published, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $7)`,
+        [itemId, next, String(r.client_id), String(r.title), String(r.description), String(r.roadmap_stage), at],
+      ],
+      ['INSERT INTO roadmap_links (item_id, report_id) VALUES ($1, $2)', [itemId, String(r.id)]],
+      ['UPDATE reports SET roadmap_stage = NULL WHERE id = $1', [String(r.id)]],
+    ])
+  }
+}
+
 async function init(): Promise<Driver> {
   const d = await createDriver()
   try {
@@ -125,6 +172,12 @@ async function init(): Promise<Driver> {
   } catch {
     // Two cold starts can race on CREATE TABLE IF NOT EXISTS. One retry settles it.
     await d.batch(SCHEMA.map((s) => [s, []]))
+  }
+  try {
+    await migrateLegacyRoadmap(d)
+  } catch (e) {
+    // Never block the app. Anything left over is retried on the next start.
+    console.error('[db] roadmap migration will retry:', e instanceof Error ? e.message : e)
   }
   return d
 }

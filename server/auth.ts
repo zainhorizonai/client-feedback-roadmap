@@ -58,9 +58,9 @@ export async function requestLogin(email: string): Promise<string | null> {
   const link = `${config.appUrl}/auth/verify?token=${token}`
   await sendQuietly({
     to: email,
-    subject: 'Your sign-in link',
+    subject: 'Your SEAM sign-in link',
     text: `Hi ${user.name},\n\nUse this link to sign in (valid for 15 minutes, one use):\n${link}\n\nIf you did not ask for this, ignore this email.`,
-    html: layout('Sign in', `<p>Hi ${escapeHtml(user.name)}, use the button below to sign in. The link works once and expires in 15 minutes.</p>`, { label: 'Sign in', url: link }),
+    html: layout('Sign in to SEAM', `<p>Hi ${escapeHtml(user.name)}, use the button below to sign in. The link works once and expires in 15 minutes.</p>`, { label: 'Open SEAM', url: link }),
   })
   return link
 }

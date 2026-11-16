@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Bug } from 'lucide-react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { ApiError } from '../lib/api'
-import { btnPrimary } from '../components/ui'
+import { Button, ButtonLink, SeamDivider } from '../components/ui'
+import { takeReturnPath } from '../lib/returnTo'
 
 /**
  * Landing page for the emailed link. The link is only spent when a person presses the button.
@@ -23,40 +23,40 @@ export function Verify() {
     setError('')
     try {
       await verify(token)
-      nav('/', { replace: true })
+      nav(takeReturnPath() ?? '/', { replace: true })
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong')
+      setError(e instanceof ApiError ? e.message : 'Something went wrong. Try again.')
       setBusy(false)
     }
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm text-center">
-        <div className="mb-6 flex items-center justify-center gap-2 text-xl font-semibold">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white"><Bug className="h-5 w-5" /></span>
-          Feedback Portal
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          {!token ? (
-            <>
-              <h1 className="text-lg font-semibold">This sign-in link is incomplete</h1>
-              <p className="mt-2 text-sm text-slate-600">Request a new link from the sign-in page.</p>
-              <Link to="/" className={`${btnPrimary} mt-4 w-full`}>Back to sign in</Link>
-            </>
-          ) : error ? (
-            <>
-              <h1 className="text-lg font-semibold">Could not sign you in</h1>
-              <p className="mt-2 text-sm text-slate-600">{error}</p>
-              <Link to="/" className={`${btnPrimary} mt-4 w-full`}>Request a new link</Link>
-            </>
-          ) : (
-            <>
-              <h1 className="text-lg font-semibold">Ready to sign in</h1>
-              <p className="mt-2 text-sm text-slate-600">Press the button to finish signing in on this device.</p>
-              <button onClick={go} disabled={busy} className={`${btnPrimary} mt-4 w-full`}>{busy ? 'Signing in…' : 'Sign in'}</button>
-            </>
-          )}
+    <div className="flex min-h-screen items-center justify-center px-4 py-10">
+      <div className="w-full max-w-sm">
+        <img src="/brand/seam-logo.svg" alt="SEAM" className="mx-auto mb-8 h-12 w-auto" />
+        <div className="overflow-hidden rounded-card border border-line bg-surface text-center shadow-sm">
+          <SeamDivider />
+          <div className="p-6" aria-live="polite">
+            {!token ? (
+              <>
+                <h1 className="font-semibold">This sign-in link is incomplete</h1>
+                <p className="mt-2 text-muted">Request a new link from the sign-in page.</p>
+                <ButtonLink to="/" className="mt-4 w-full">Back to sign in</ButtonLink>
+              </>
+            ) : error ? (
+              <>
+                <h1 className="font-semibold">That link did not work</h1>
+                <p className="mt-2 text-muted">{error}</p>
+                <ButtonLink to="/" className="mt-4 w-full">Request a new link</ButtonLink>
+              </>
+            ) : (
+              <>
+                <h1 className="font-semibold">Ready to sign in</h1>
+                <p className="mt-2 text-muted">Press the button to finish signing in on this device.</p>
+                <Button onClick={go} pending={busy} className="mt-4 w-full">Sign in</Button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

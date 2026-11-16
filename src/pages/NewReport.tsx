@@ -1,31 +1,32 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Bug, CheckCircle2, ClipboardCheck, HelpCircle, Lightbulb, type LucideIcon } from 'lucide-react'
+import { useAuth } from '../lib/auth'
 import { ApiError } from '../lib/api'
 import { createReport } from '../lib/store'
 import { hasSeverity, SEVERITIES, type Kind, type Severity } from '../lib/types'
 import { Recorder } from '../components/Recorder'
-import { btnPrimary, btnSecondary, inputCls } from '../components/ui'
+import { Button, ButtonLink, Field, Mono, SeamDivider } from '../components/ui'
 
-const KIND_OPTIONS: { kind: Kind; icon: LucideIcon; label: string; hint: string; param: string }[] = [
-  { kind: 'Bug', icon: Bug, label: 'Bug', hint: 'Something is broken', param: 'bug' },
-  { kind: 'UAT finding', icon: ClipboardCheck, label: 'UAT finding', hint: 'Found while testing', param: 'uat' },
-  { kind: 'Feature request', icon: Lightbulb, label: 'Feature request', hint: 'An idea or change', param: 'feature' },
-  { kind: 'Question', icon: HelpCircle, label: 'Question', hint: 'Something to ask us', param: 'question' },
+const OPTIONS: { kind: Kind; icon: LucideIcon; hint: string; param: string }[] = [
+  { kind: 'Bug', icon: Bug, hint: 'Something is broken', param: 'bug' },
+  { kind: 'UAT finding', icon: ClipboardCheck, hint: 'Found while testing', param: 'uat' },
+  { kind: 'Feature request', icon: Lightbulb, hint: 'An idea or change', param: 'feature' },
+  { kind: 'Question', icon: HelpCircle, hint: 'Something to ask us', param: 'question' },
 ]
 
-const COPY: Record<Kind, { title: string; titlePlaceholder: string; detail: string; video: string }> = {
-  Bug: { title: 'Report a bug', titlePlaceholder: 'e.g. Save button does nothing', detail: 'What did you expect to happen?', video: 'Show us the problem (recommended)' },
-  'UAT finding': { title: 'Report a UAT finding', titlePlaceholder: 'e.g. Total is wrong on the invoice screen', detail: 'What did you expect to happen?', video: 'Show us what you found (recommended)' },
-  'Feature request': { title: 'Request a feature', titlePlaceholder: 'e.g. Export reports to CSV', detail: 'What would this help you do?', video: 'Show us what you mean (optional)' },
-  Question: { title: 'Ask a question', titlePlaceholder: 'e.g. How do I add a new user?', detail: 'Tell us more', video: 'Show us (optional)' },
+const COPY: Record<Kind, { title: string; placeholder: string; detail: string; videoTitle: string; videoHint: string }> = {
+  Bug: { title: 'Report a bug', placeholder: 'For example: Save button does nothing', detail: 'What did you expect to happen?', videoTitle: 'Show us the problem', videoHint: 'A short screen recording is the fastest way for us to see it. You can talk while you record.' },
+  'UAT finding': { title: 'Report a UAT finding', placeholder: 'For example: Total is wrong on the invoice screen', detail: 'What did you expect to happen?', videoTitle: 'Show us what you found', videoHint: 'A short screen recording helps us repeat the test.' },
+  'Feature request': { title: 'Request a feature', placeholder: 'For example: Export reports to CSV', detail: 'What would this help you do?', videoTitle: 'Show us what you mean (optional)', videoHint: 'Only if it helps. Text alone is fine.' },
+  Question: { title: 'Ask a question', placeholder: 'For example: How do I add a new user?', detail: 'Tell us more', videoTitle: 'Show us (optional)', videoHint: 'Only if it helps. Text alone is fine.' },
 }
 
 export function NewReport() {
   const nav = useNavigate()
+  const { maxVideoMb } = useAuth()
   const [params] = useSearchParams()
-  const initial = KIND_OPTIONS.find((o) => o.param === params.get('type'))?.kind ?? 'Bug'
-  const [kind, setKind] = useState<Kind>(initial)
+  const [kind, setKind] = useState<Kind>(OPTIONS.find((o) => o.param === params.get('type'))?.kind ?? 'Bug')
   const [video, setVideo] = useState<Blob | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -34,11 +35,19 @@ export function NewReport() {
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(0)
   const [doneId, setDoneId] = useState<string | null>(null)
+  const [titleError, setTitleError] = useState('')
   const [error, setError] = useState('')
+  const titleRef = useRef<HTMLInputElement>(null)
   const copy = COPY[kind]
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (busy) return // never send twice
+    if (!title.trim()) {
+      setTitleError('Enter a title so we know what this is about.')
+      titleRef.current?.focus()
+      return
+    }
     setBusy(true)
     setProgress(0)
     setError('')
@@ -46,7 +55,8 @@ export function NewReport() {
       const r = await createReport({ title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) ? severity : 'Medium', kind }, video, setProgress)
       setDoneId(r.id)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Upload failed. Please try again.')
+      // Everything they typed, and the video, stay in place so Retry is one click.
+      setError(err instanceof ApiError ? err.message : 'It did not send. Check your connection and try again.')
     } finally {
       setBusy(false)
     }
@@ -54,87 +64,91 @@ export function NewReport() {
 
   if (doneId) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-16 text-center">
-        <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" />
-        <h1 className="mt-4 text-2xl font-semibold">Sent</h1>
-        <p className="mt-2 text-slate-600">
-          Thanks. Your {kind.toLowerCase()} is <span className="font-mono font-medium">{doneId}</span>. We have been emailed and will update you here and by email.
-        </p>
-        <div className="mt-6 flex justify-center gap-3">
-          <button className={btnPrimary} onClick={() => nav(`/reports/${doneId}`)}>View it</button>
-          <Link to="/reports" className={btnSecondary}>All my items</Link>
+      <div className="mx-auto max-w-md pt-6">
+        <div className="overflow-hidden rounded-card border border-line bg-surface text-center">
+          <SeamDivider />
+          <div className="p-6" role="status">
+            <CheckCircle2 className="mx-auto h-10 w-10 text-[var(--seam-success-fg)]" aria-hidden="true" />
+            <h1 className="mt-3 font-semibold">Report received</h1>
+            <p className="mt-2 text-muted">Your reference is <Mono className="font-semibold text-ink">{doneId}</Mono>. We will update you here and by email.</p>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <Button onClick={() => nav(`/reports/${doneId}`)}>View report</Button>
+              <ButtonLink to="/reports" variant="secondary">Back to my reports</ButtonLink>
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
-  return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <Link to="/reports" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /> My items</Link>
-      <h1 className="text-2xl font-semibold">{copy.title}</h1>
+  const videoFirst = kind === 'Bug' || kind === 'UAT finding'
+  const videoSection = (
+    <section aria-labelledby="video-h">
+      <h2 id="video-h" className="font-semibold">{copy.videoTitle}</h2>
+      <p className="mb-3 mt-1 text-muted">{copy.videoHint}</p>
+      <Recorder blob={video} onChange={setVideo} maxMb={maxVideoMb} />
+    </section>
+  )
 
-      <form onSubmit={submit} className="mt-6 space-y-6">
-        <section>
-          <h2 className="mb-2 text-sm font-semibold text-slate-700">What are you sending us?</h2>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {KIND_OPTIONS.map((o) => (
-              <button
-                key={o.kind}
-                type="button"
-                onClick={() => setKind(o.kind)}
-                aria-pressed={kind === o.kind}
-                className={`rounded-xl border p-3 text-left transition ${kind === o.kind ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-100' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-              >
-                <o.icon className={`h-5 w-5 ${kind === o.kind ? 'text-brand-600' : 'text-slate-400'}`} />
-                <div className="mt-1.5 text-sm font-medium">{o.label}</div>
-                <div className="text-xs text-slate-500">{o.hint}</div>
-              </button>
+  return (
+    <div className="mx-auto max-w-2xl">
+      <Link to="/reports" className="mb-4 inline-flex min-h-9 items-center gap-1 text-muted"><ArrowLeft className="h-4 w-4" aria-hidden="true" />My reports</Link>
+      <h1 className="font-semibold">{copy.title}</h1>
+
+      <form onSubmit={submit} noValidate className="mt-6 space-y-8">
+        <fieldset>
+          <legend className="mb-2 font-semibold">What are you sending us?</legend>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            {OPTIONS.map((o) => (
+              <label key={o.kind} className={`relative flex cursor-pointer flex-col rounded-card border p-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${kind === o.kind ? 'border-action bg-surface ring-2 ring-action' : 'border-line bg-surface hover:border-control'}`}>
+                <input type="radio" name="kind" value={o.kind} checked={kind === o.kind} onChange={() => setKind(o.kind)} className="sr-only" />
+                <o.icon className={`h-5 w-5 ${kind === o.kind ? 'text-action' : 'text-muted'}`} aria-hidden="true" />
+                <span className="mt-2 font-semibold">{o.kind}</span>
+                <span className="text-sm text-muted">{o.hint}</span>
+              </label>
             ))}
           </div>
-        </section>
+        </fieldset>
 
-        <section className="space-y-4">
-          <h2 className="text-sm font-semibold text-slate-700">Details</h2>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">Title <span className="text-red-500">*</span></span>
-            <input required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={copy.titlePlaceholder} className={inputCls} />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">{copy.detail}</span>
-            <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={inputCls} />
-          </label>
+        {videoFirst && videoSection}
+
+        <section aria-labelledby="details-h" className="space-y-4">
+          <h2 id="details-h" className="font-semibold">Details</h2>
+          <Field label="Title" required error={titleError}>
+            <input ref={titleRef} className="input" maxLength={120} value={title} aria-invalid={!!titleError} placeholder={copy.placeholder} onChange={(e) => { setTitle(e.target.value); if (titleError) setTitleError('') }} />
+          </Field>
+          <Field label={copy.detail}>
+            <textarea className="input" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </Field>
           <div className={`grid gap-4 ${hasSeverity(kind) ? 'sm:grid-cols-2' : ''}`}>
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium">Page or feature <span className="font-normal text-slate-500">(optional)</span></span>
-              <input value={pageUrl} onChange={(e) => setPageUrl(e.target.value)} placeholder="https://… or feature name" className={inputCls} />
-            </label>
+            <Field label="Page or link" hint="Optional. Where did this happen?">
+              <input className="input" value={pageUrl} onChange={(e) => setPageUrl(e.target.value)} placeholder="https://…" />
+            </Field>
             {hasSeverity(kind) && (
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">Severity</span>
-                <select value={severity} onChange={(e) => setSeverity(e.target.value as Severity)} className={inputCls}>
+              <Field label="Severity" hint="How much does it get in your way?">
+                <select className="input" value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
                   {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
                 </select>
-              </label>
+              </Field>
             )}
           </div>
         </section>
 
-        <section>
-          <h2 className="mb-2 text-sm font-semibold text-slate-700">{copy.video}</h2>
-          <Recorder blob={video} onChange={setVideo} />
-          {!video && <p className="mt-2 text-xs text-slate-500">You can skip this and send it without a video.</p>}
-        </section>
+        {!videoFirst && videoSection}
 
-        {busy && (
-          <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-            <div className="h-full bg-brand-600 transition-all" style={{ width: `${Math.round(progress * 100)}%` }} />
+        {busy && video && (
+          <div role="progressbar" aria-label="Uploading video" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100} className="h-2 overflow-hidden rounded-full bg-subtle">
+            <div className="h-full bg-action transition-all" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
         )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex items-center justify-end">
-          <button type="submit" disabled={!title.trim() || busy} className={btnPrimary}>
-            {busy ? (video ? `Uploading ${Math.round(progress * 100)}%` : 'Sending…') : 'Send'}
-          </button>
+        {error && (
+          <div role="alert" className="rounded-card bg-[var(--seam-error-bg)] p-3 text-[var(--seam-error-fg)]">
+            <p className="font-semibold">It did not send</p>
+            <p>{error} Your details and video are still here. Press Send to try again.</p>
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-3 border-t border-line pt-4">
+          <Button type="submit" pending={busy}>{busy ? (video ? `Uploading ${Math.round(progress * 100)}%` : 'Sending') : error ? 'Try again' : 'Send report'}</Button>
         </div>
       </form>
     </div>

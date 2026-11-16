@@ -1,6 +1,8 @@
-# Feedback Portal
+# SEAM
 
-Clients record a video of a bug or UAT issue. Each video becomes a row in a spreadsheet-style tracker that you work through until it is resolved. Clients and admins both get emails as things change.
+From client feedback to what ships. See `DESIGN-NOTES.md` for how the design handoff was implemented and what is not built yet.
+
+Clients record a video of a bug or UAT issue, send a request or ask a question. Each report is a row in a tracker your team works through until it is resolved and verified by the client. Selected work is published on a client roadmap. Clients and admins both get emails as things change.
 
 React + Vite frontend, Hono API on Vercel Functions, Postgres (Neon), videos in Vercel Blob (private).
 
@@ -25,9 +27,8 @@ Optional: set `MAX_VIDEO_MB` (default 500).
 
 ## What clients and admins can do
 
-- **Clients** send a Bug, UAT finding, Feature request or Question. A video is optional. They follow each item's status, reply in its thread, and see a **Roadmap** board (Under review, Planned, In progress, Done) with their own items only.
-- **Admins** work everything in the **Tracker**, move items across the **Roadmap** board, and use **Add item** to put work on a client's roadmap themselves. Clients are emailed when their items move.
-- Feature requests land on the client's roadmap as "Under review". Bugs stay off it unless you add them.
+- **Clients** send a Bug, UAT finding, Feature request or Question. A video is optional. They follow each report's status, reply in its conversation, confirm a fix or say it is still broken, and see a **Roadmap** of the items published to their project.
+- **Admins** triage new reports in the **Inbox**, work everything in the **Tracker**, reply to clients and keep private internal notes in the report drawer, and build the **Roadmap**: create items, link the reports they cover, and publish them. Publishing is always explicit. An item moving to Done does not resolve its reports.
 
 ## How uploads work on Vercel
 

@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { api, ApiError, uploadVideo, type UploadFlow, type UploadMode } from './api'
 import { notify } from './toast'
-import type { Kind, Report, RoadmapStage, Severity, Status } from './types'
+import type { Kind, Report, Severity, Status } from './types'
 
 interface State { reports: Report[]; loaded: boolean }
 let state: State = { reports: [], loaded: false }
@@ -100,9 +100,10 @@ export function updateFields(id: string, patch: Editable) {
   return act(() => api.patch(`/api/reports/${id}`, patch))
 }
 
+// Triaging is internal, so no email goes out for it.
 export function setStatus(id: string, status: Status) {
   optimistic(id, { status })
-  return act(() => api.patch(`/api/reports/${id}`, { status }), `Status set to "${status}". The client has been emailed.`)
+  return act(() => api.patch(`/api/reports/${id}`, { status }), status === 'New' || status === 'Triaging' ? `Status set to ${status}.` : `Status set to ${status}. The client has been emailed.`)
 }
 
 export const addReply = (id: string, text: string) =>
@@ -112,14 +113,4 @@ export const addClientComment = (id: string, text: string) =>
   act(() => api.post(`/api/reports/${id}/comments`, { text }), 'Comment sent.')
 
 export const clientConfirm = (id: string, fixed: boolean, note: string) =>
-  act(() => api.post(`/api/reports/${id}/confirm`, { fixed, note }), fixed ? 'Thanks for confirming.' : 'Thanks. We will take another look.')
-
-export function setRoadmapStage(id: string, stage: RoadmapStage | null) {
-  optimistic(id, { roadmapStage: stage ?? undefined })
-  return act(() => api.patch(`/api/reports/${id}`, { roadmapStage: stage }), stage ? `Moved to "${stage}". The client has been emailed.` : 'Removed from the roadmap.')
-}
-
-/** Admin: add an item (roadmap or future work) on behalf of a client. */
-export async function addItemForClient(input: { clientId: string; title: string; description: string; kind: Kind; roadmapStage: RoadmapStage | null }): Promise<boolean> {
-  return act(() => api.post('/api/admin/items', input), 'Added. The client has been emailed.')
-}
+  act(() => api.post(`/api/reports/${id}/confirm`, { fixed, note }), fixed ? 'Thanks for confirming. This report is resolved.' : 'Thanks. We will take another look.')

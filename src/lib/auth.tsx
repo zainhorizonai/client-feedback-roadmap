@@ -1,10 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { api } from './api'
+import { resetRoadmap } from './roadmap'
 import { resetStore } from './store'
 import type { User } from './types'
 
 interface Auth {
   user: User | null
+  /** Upload limit, from server configuration. */
+  maxVideoMb: number
   loading: boolean
   /** Asks the server to email a sign-in link. devLink is only returned in local development. */
   requestLink: (email: string) => Promise<{ devLink?: string }>
@@ -17,10 +20,11 @@ const Ctx = createContext<Auth | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [maxVideoMb, setMaxVideoMb] = useState(500)
 
   useEffect(() => {
-    api.get<{ user: User | null }>('/api/me')
-      .then((r) => setUser(r.user))
+    api.get<{ user: User | null; limits?: { maxVideoMb: number } }>('/api/me')
+      .then((r) => { setUser(r.user); if (r.limits) setMaxVideoMb(r.limits.maxVideoMb) })
       .catch(() => setUser(null))
       .finally(() => setLoading(false))
   }, [])
@@ -33,10 +37,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await api.post('/api/auth/logout').catch(() => {})
     resetStore()
+    resetRoadmap()
     setUser(null)
   }, [])
 
-  return <Ctx.Provider value={{ user, loading, requestLink, verify, signOut }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ user, maxVideoMb, loading, requestLink, verify, signOut }}>{children}</Ctx.Provider>
 }
 
 export function useAuth(): Auth {

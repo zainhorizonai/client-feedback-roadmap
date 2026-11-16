@@ -11,10 +11,10 @@ import { blobPrefix, extFor, getStorage, isAllowedMime, normalizeMime, TooLargeE
 type Env = { Variables: { user: AuthUser | null } }
 export const app = new Hono<Env>()
 
-const STATUSES = ['New', 'Triaging', 'In progress', 'Ready to verify', 'Resolved'] as const
+const STATUSES = ['New', 'Triaging', 'In progress', 'Needs client input', 'Ready to verify', 'Resolved'] as const
 const SEVERITIES = ['Low', 'Medium', 'High', 'Blocker'] as const
 const KINDS = ['Bug', 'UAT finding', 'Feature request', 'Question'] as const
-const STAGES = ['Under review', 'Planned', 'In progress', 'Done'] as const
+const ROADMAP_STATES = ['Under review', 'Planned', 'In progress', 'Done'] as const
 type Status = (typeof STATUSES)[number]
 type Kind = (typeof KINDS)[number]
 // The number is shared across all types, so BUG-0003 and REQ-0004 can never collide.
@@ -87,12 +87,13 @@ interface ReportRow {
   notes: string; resolution_url: string; video_path: string | null; video_mime: string | null; resolved_at: string | null
   kind: Kind; roadmap_stage: string | null; submitted_at: string | null; reporter_role: 'admin' | 'client'
 }
-interface HistoryRow { report_id: string; at: string; by: string; kind: string; text: string }
+interface HistoryRow { report_id: string; at: string; by: string; kind: string; text: string; from_value: string | null; to_value: string | null }
+interface LinkedItem { id: string; title: string; state: string }
 
 const REPORT_SELECT = `SELECT r.*, c.name AS client_name, u.name AS reporter_name, u.email AS reporter_email, u.role AS reporter_role
   FROM reports r JOIN clients c ON c.id = r.client_id JOIN users u ON u.id = r.reporter_id`
 
-function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[]) {
+function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[], items: LinkedItem[] = []) {
   return {
     id: r.id,
     createdAt: r.created_at,
@@ -106,13 +107,12 @@ function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[]) {
     severity: r.severity,
     status: r.status,
     kind: r.kind,
-    roadmapStage: r.roadmap_stage ?? undefined,
-    // Internal notes never leave the server for clients.
-    ...(user.role === 'admin' ? { notes: r.notes } : {}),
+    // Internal notes and roadmap links never leave the server for clients.
+    ...(user.role === 'admin' ? { notes: r.notes, roadmapItems: items } : {}),
     resolutionUrl: r.resolution_url,
     hasVideo: !!r.video_path,
     resolvedAt: r.resolved_at ?? undefined,
-    history: history.map(({ at, by, kind, text }) => ({ at, by, kind, text })),
+    history: history.map(({ at, by, kind, text, from_value, to_value }) => ({ at, by, kind, text, from: from_value ?? undefined, to: to_value ?? undefined })),
   }
 }
 
@@ -120,7 +120,7 @@ async function historyFor(ids: string[]): Promise<Map<string, HistoryRow[]>> {
   const map = new Map<string, HistoryRow[]>()
   if (ids.length === 0) return map
   const rows = await all<HistoryRow>(
-    `SELECT report_id, at, by, kind, text FROM history WHERE report_id = ANY($1::text[]) ORDER BY id`,
+    `SELECT report_id, at, by, kind, text, from_value, to_value FROM history WHERE report_id = ANY($1::text[]) ORDER BY id`,
     // Both Postgres drivers accept an array literal for a text[] parameter.
     `{${ids.map((i) => `"${i}"`).join(',')}}`,
   )
@@ -136,16 +136,34 @@ async function loadReport(user: AuthUser, id: string): Promise<ReportRow> {
   return r
 }
 
-const withHistory = async (r: ReportRow, user: AuthUser) => serialize(r, user, (await historyFor([r.id])).get(r.id) ?? [])
+/** Roadmap items each report is linked to. Admin-only: clients never see what is behind a report. */
+async function itemsFor(ids: string[]): Promise<Map<string, LinkedItem[]>> {
+  const map = new Map<string, LinkedItem[]>()
+  if (ids.length === 0) return map
+  const rows = await all<LinkedItem & { report_id: string }>(
+    `SELECT l.report_id, i.id, i.title, i.state FROM roadmap_links l JOIN roadmap_items i ON i.id = l.item_id
+      WHERE l.report_id = ANY($1::text[]) ORDER BY i.seq`,
+    `{${ids.map((i) => `"${i}"`).join(',')}}`,
+  )
+  for (const x of rows) (map.get(x.report_id) ?? map.set(x.report_id, []).get(x.report_id)!).push({ id: x.id, title: x.title, state: x.state })
+  return map
+}
 
-const addHistory = (id: string, by: 'client' | 'admin' | 'system', kind: string, msg: string) =>
-  run('INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', id, now(), by, kind, msg)
+const withHistory = async (r: ReportRow, user: AuthUser) =>
+  serialize(r, user, (await historyFor([r.id])).get(r.id) ?? [], user.role === 'admin' ? (await itemsFor([r.id])).get(r.id) ?? [] : [])
+
+const addHistory = (id: string, by: 'client' | 'admin' | 'system', kind: string, msg: string, from: string | null = null, to: string | null = null) =>
+  run('INSERT INTO history (report_id, at, by, kind, text, from_value, to_value) VALUES ($1, $2, $3, $4, $5, $6, $7)', id, now(), by, kind, msg, from, to)
+
+type Stmt = [string, (string | null)[]]
+const historyStmt = (id: string, by: string, kind: string, msg: string, from: string | null = null, to: string | null = null): Stmt =>
+  ['INSERT INTO history (report_id, at, by, kind, text, from_value, to_value) VALUES ($1, $2, $3, $4, $5, $6, $7)', [id, now(), by, kind, msg, from, to]]
 
 async function adminEmails(): Promise<string[]> {
   return (await all<{ email: string }>("SELECT email FROM users WHERE role = 'admin'")).map((a) => a.email)
 }
 
-const adminLink = (id: string) => `${config.appUrl}/admin?report=${id}`
+const adminLink = (id: string) => `${config.appUrl}/admin/tracker?report=${id}`
 const clientLink = (id: string) => `${config.appUrl}/reports/${id}`
 
 async function mailAdmins(subject: string, lines: string[], id: string) {
@@ -153,7 +171,7 @@ async function mailAdmins(subject: string, lines: string[], id: string) {
     to: await adminEmails(),
     subject,
     text: `${lines.join('\n')}\n\n${adminLink(id)}`,
-    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'Open in tracker', url: adminLink(id) }),
+    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'Open report', url: adminLink(id) }),
   })
 }
 /** Whoever sent the item gets the email. Items added by the team go to everyone at that client. */
@@ -166,8 +184,16 @@ const mailClient = async (r: ReportRow, subject: string, lines: string[]) =>
     to: await clientRecipients(r),
     subject,
     text: `Hello,\n\n${lines.join('\n')}\n\n${clientLink(r.id)}`,
-    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'View it', url: clientLink(r.id) }),
+    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'View report', url: clientLink(r.id) }),
   })
+
+/** What each status email says. A status with no entry (New, Triaging) sends nothing. */
+const STATUS_EMAIL: Partial<Record<Status, (r: ReportRow) => string[]>> = {
+  'In progress': (r) => [`We are working on "${r.title}".`],
+  'Needs client input': (r) => [`We need something from you to continue with "${r.title}". Open it to see our question and reply.`],
+  'Ready to verify': () => ['The fix is ready. Try it again and tell us if it works.'],
+  Resolved: (r) => [`"${r.title}" is resolved. Thanks for helping us get it right.`],
+}
 
 // ---------- middleware ----------
 
@@ -202,7 +228,8 @@ app.use('/api/*', async (c, next) => {
 
 app.get('/api/health', (c) => c.json({ ok: true }))
 
-app.get('/api/me', (c) => c.json({ user: c.get('user') }))
+// The limits come from configuration so the interface never repeats a number that could drift.
+app.get('/api/me', (c) => c.json({ user: c.get('user'), limits: { maxVideoMb: maxMb() } }))
 
 const secretMatches = (given: string, expected: string) =>
   !!expected && given.length === expected.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))
@@ -293,8 +320,10 @@ app.get('/api/reports', async (c) => {
   const rows = user.role === 'admin'
     ? await all<ReportRow>(`${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL ORDER BY r.seq DESC`)
     : await all<ReportRow>(`${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL AND r.client_id = $1 ORDER BY r.seq DESC`, user.clientId)
-  const hist = await historyFor(rows.map((r) => r.id))
-  return c.json({ reports: rows.map((r) => serialize(r, user, hist.get(r.id) ?? [])) })
+  const ids = rows.map((r) => r.id)
+  const hist = await historyFor(ids)
+  const linked = user.role === 'admin' ? await itemsFor(ids) : new Map<string, LinkedItem[]>()
+  return c.json({ reports: rows.map((r) => serialize(r, user, hist.get(r.id) ?? [], linked.get(r.id) ?? [])) })
 })
 
 app.get('/api/reports/:id', async (c) => {
@@ -306,16 +335,16 @@ app.get('/api/reports/:id', async (c) => {
  *  constraint rejects the loser, which simply retries. */
 async function insertReport(f: {
   clientId: string; reporterId: string; title: string; description: string; pageUrl: string
-  severity: string; kind: Kind; stage: string | null; submittedAt: string | null
+  severity: string; kind: Kind; submittedAt: string | null
 }): Promise<string> {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       const row = await one<{ id: string }>(
-        `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity, kind, roadmap_stage, submitted_at)
-         SELECT $11::text || '-' || LPAD(n::text, 4, '0'), n, $1, $2, $3, $4, $5, $6, $7, $8, $9::text, $10::text
+        `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity, kind, submitted_at)
+         SELECT $10::text || '-' || LPAD(n::text, 4, '0'), n, $1, $2, $3, $4, $5, $6, $7, $8, $9::text
            FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM reports) s
          RETURNING id`,
-        now(), f.clientId, f.reporterId, f.title, f.description, f.pageUrl, f.severity, f.kind, f.stage, f.submittedAt, ID_PREFIX[f.kind],
+        now(), f.clientId, f.reporterId, f.title, f.description, f.pageUrl, f.severity, f.kind, f.submittedAt, ID_PREFIX[f.kind],
       )
       if (row) return row.id
     } catch (e) {
@@ -325,13 +354,10 @@ async function insertReport(f: {
   throw new HttpError(409, 'Could not create the item, please try again')
 }
 
-// Feature requests start on the client's roadmap as "Under review". Everything else starts off it.
-const defaultStage = (kind: Kind) => (kind === 'Feature request' ? 'Under review' : null)
-
 async function announceSubmission(r: ReportRow) {
-  const what = r.kind === 'Bug' || r.kind === 'UAT finding' ? `${r.severity} ${r.kind.toLowerCase()}` : r.kind.toLowerCase()
-  await mailAdmins(`New ${what} from ${r.client_name}: ${r.title}`, [`${r.reporter_name} (${r.client_name}) submitted ${r.id} (${r.kind}).`, ...(r.kind === 'Bug' || r.kind === 'UAT finding' ? [`Severity: ${r.severity}`] : []), r.description], r.id)
-  await mailClient(r, `We received your ${r.kind.toLowerCase()} ${r.id}`, [`Thanks, we received "${r.title}" and will update you here and by email.`])
+  const issue = r.kind === 'Bug' || r.kind === 'UAT finding'
+  await mailAdmins(`New report from ${r.client_name} · ${r.id}`, [`${r.reporter_name} (${r.client_name}) sent a ${r.kind.toLowerCase()}: ${r.title}`, ...(issue ? [`Severity: ${r.severity}`] : []), r.description], r.id)
+  await mailClient(r, `We received your report · ${r.id}`, [`Thanks. We received "${r.title}". We will update you here and by email.`])
 }
 
 app.post('/api/reports', async (c) => {
@@ -349,7 +375,7 @@ app.post('/api/reports', async (c) => {
 
   const id = await insertReport({
     clientId: user.clientId!, reporterId: user.id, title, description, pageUrl, severity, kind,
-    stage: defaultStage(kind), submittedAt: withVideo ? null : now(),
+    submittedAt: withVideo ? null : now(),
   })
   if (!withVideo) {
     await addHistory(id, 'client', 'created', 'Report submitted')
@@ -483,32 +509,24 @@ app.patch('/api/reports/:id', async (c) => {
     newStatus = oneOf(body.status, STATUSES, 'status')
     if (newStatus !== r.status) {
       set('status', newStatus)
+      // Reopening clears the resolved date. Earlier closures stay in the history.
       set('resolved_at', newStatus === 'Resolved' ? now() : null)
     } else newStatus = null
   }
 
-  // roadmapStage: a stage puts the item on the client's roadmap, null takes it off.
-  let newStage: string | null | undefined
-  if ('roadmapStage' in body) {
-    const next = body.roadmapStage === null || body.roadmapStage === '' ? null : oneOf(body.roadmapStage, STAGES, 'roadmapStage')
-    if (next !== r.roadmap_stage) { newStage = next; set('roadmap_stage', next) }
-  }
-
   if (sets.length) {
-    const update: [string, (string | null)[]] = [`UPDATE reports SET ${sets.join(', ')} WHERE id = $${vals.length + 1}`, [...vals, r.id]]
-    const stmts: [string, (string | null)[]][] = [update]
-    const log = (msg: string) => stmts.push(['INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', [r.id, now(), 'admin', 'status', msg]])
-    if (newStatus) log(`Status changed from ${r.status} to ${newStatus}`)
-    if (newStage !== undefined) log(newStage ? `Roadmap: ${r.roadmap_stage ?? 'not on the roadmap'} to ${newStage}` : 'Removed from the roadmap')
+    const update: Stmt = [`UPDATE reports SET ${sets.join(', ')} WHERE id = $${vals.length + 1}`, [...vals, r.id]]
+    const stmts: Stmt[] = [update]
+    if (newStatus) {
+      stmts.push(historyStmt(r.id, 'admin', 'status', `Status changed from ${r.status} to ${newStatus}`, r.status, newStatus))
+      if (newStatus === 'Resolved') stmts.push(historyStmt(r.id, 'admin', 'outcome', 'Closed by admin'))
+    }
     if (stmts.length > 1) await batch(stmts)
     else await run(update[0], ...update[1])
   }
-  if (newStage) {
-    await mailClient(r, `${r.id} is now "${newStage}" on your roadmap`, [`"${r.title}" moved to ${newStage} on your roadmap.`])
-  }
-  if (newStatus) {
-    await mailClient(r, `${r.id} is now "${newStatus}"`, [`The status of "${r.title}" changed from ${r.status} to ${newStatus}.`])
-  }
+  // Triaging is internal. Every other change the client should know about is emailed once.
+  const say = newStatus && STATUS_EMAIL[newStatus]
+  if (newStatus && say) await mailClient(r, `${r.id} is ${newStatus}`, say(r))
   return c.json({ report: await withHistory(await loadReport(admin, r.id), admin) })
 })
 
@@ -517,7 +535,7 @@ app.post('/api/reports/:id/replies', async (c) => {
   const r = await loadReport(admin, c.req.param('id'))
   const msg = text((await json(c)).text, 'text', 4000, true)
   await addHistory(r.id, 'admin', 'reply', msg)
-  await mailClient(r, `New reply on ${r.id}`, [`Reply about "${r.title}":`, msg])
+  await mailClient(r, `New update on ${r.id}`, [`An update on "${r.title}":`, msg])
   return c.json({ report: await withHistory(r, admin) })
 })
 
@@ -537,34 +555,147 @@ app.post('/api/reports/:id/confirm', async (c) => {
   const body = await json(c)
   const fixed = body.fixed === true
   const note = text(body.note, 'note', 2000)
-  const msg = fixed ? 'Client confirmed the fix' : `Client says it is still broken${note ? `: ${note}` : ''}`
+  const to: Status = fixed ? 'Resolved' : 'In progress'
   await batch([
-    ['INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', [r.id, now(), 'client', 'confirm', msg]],
+    historyStmt(r.id, 'client', 'status', `Status changed from ${r.status} to ${to}`, r.status, to),
+    historyStmt(r.id, 'client', 'outcome', fixed ? 'Verified by client' : `Still broken${note ? `: ${note}` : ''}`),
     fixed
       ? ["UPDATE reports SET status = 'Resolved', resolved_at = $1 WHERE id = $2", [now(), r.id]]
       : ["UPDATE reports SET status = 'In progress', resolved_at = NULL WHERE id = $1", [r.id]],
   ])
-  await mailAdmins(fixed ? `${r.id} confirmed fixed by ${r.client_name}` : `${r.id} is still broken (${r.client_name})`, [msg], r.id)
+  await mailAdmins(`${r.id} · ${fixed ? 'Verified by client' : 'Still broken'}`, [fixed ? `${r.client_name} confirmed the fix for "${r.title}".` : `${r.client_name} says "${r.title}" is still broken.`, ...(note && !fixed ? [note] : [])], r.id)
   return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
 })
 
-// ---------- admin: add an item for a client (roadmap, future work) ----------
+// ---------- roadmap items ----------
+// Separate from reports. A client only sees items published to their project, with a public description and
+// update. Linked reports are never exposed: a client gets at most a count of their own linked reports.
 
-app.post('/api/admin/items', async (c) => {
-  const admin = requireAdmin(c)
+interface ItemRow {
+  id: string; seq: number; client_id: string; client_name: string; title: string; description: string
+  state: string; target_window: string; client_update: string; published: number; created_at: string; updated_at: string
+}
+const ITEM_SELECT = 'SELECT i.*, c.name AS client_name FROM roadmap_items i JOIN clients c ON c.id = i.client_id'
+
+async function linkedReports(ids: string[]) {
+  const map = new Map<string, { id: string; title: string; status: string; kind: string; submitted: boolean }[]>()
+  if (ids.length === 0) return map
+  const rows = await all<{ item_id: string; id: string; title: string; status: string; kind: string; submitted_at: string | null }>(
+    `SELECT l.item_id, r.id, r.title, r.status, r.kind, r.submitted_at FROM roadmap_links l JOIN reports r ON r.id = l.report_id
+      WHERE l.item_id = ANY($1::text[]) ORDER BY r.seq`,
+    `{${ids.map((i) => `"${i}"`).join(',')}}`,
+  )
+  for (const x of rows) (map.get(x.item_id) ?? map.set(x.item_id, []).get(x.item_id)!).push({ id: x.id, title: x.title, status: x.status, kind: x.kind, submitted: !!x.submitted_at })
+  return map
+}
+
+function serializeItem(i: ItemRow, user: AuthUser, links: { id: string; title: string; status: string; kind: string; submitted: boolean }[]) {
+  const base = { id: i.id, clientId: i.client_id, title: i.title, description: i.description, state: i.state, targetWindow: i.target_window, clientUpdate: i.client_update, updatedAt: i.updated_at }
+  if (user.role === 'admin') {
+    return { ...base, clientName: i.client_name, published: i.published === 1, createdAt: i.created_at, reports: links.map(({ id, title, status, kind }) => ({ id, title, status, kind })) }
+  }
+  // For clients: only a count, and only of reports in their own project that they can already open.
+  return { ...base, linkedCount: links.filter((l) => l.submitted).length }
+}
+
+async function loadItem(user: AuthUser, id: string): Promise<ItemRow> {
+  const i = await one<ItemRow>(`${ITEM_SELECT} WHERE i.id = $1`, id)
+  if (!i || (user.role === 'client' && (i.client_id !== user.clientId || i.published !== 1))) throw new HttpError(404, 'Roadmap item not found')
+  return i
+}
+
+app.get('/api/roadmap', async (c) => {
+  const user = requireUser(c)
+  const filter = user.role === 'admin' ? (c.req.query('clientId') ?? '') : ''
+  const rows = user.role === 'admin'
+    ? filter
+      ? await all<ItemRow>(`${ITEM_SELECT} WHERE i.client_id = $1 ORDER BY i.seq DESC`, filter)
+      : await all<ItemRow>(`${ITEM_SELECT} ORDER BY i.seq DESC`)
+    : await all<ItemRow>(`${ITEM_SELECT} WHERE i.client_id = $1 AND i.published = 1 ORDER BY i.seq DESC`, user.clientId)
+  const links = await linkedReports(rows.map((i) => i.id))
+  return c.json({ items: rows.map((i) => serializeItem(i, user, links.get(i.id) ?? [])) })
+})
+
+/** Replaces an item's links. Every report must belong to the item's own project. */
+async function linkStatements(itemId: string, clientId: string, reportIds: unknown): Promise<Stmt[]> {
+  if (!Array.isArray(reportIds) || reportIds.length > 100 || reportIds.some((x) => typeof x !== 'string')) throw new HttpError(400, 'reportIds must be a list of report ids')
+  const ids = [...new Set(reportIds as string[])]
+  if (ids.some((i) => !/^[A-Z]+-\d{4,}$/.test(i))) throw new HttpError(400, 'Invalid report id')
+  if (ids.length) {
+    const ok = await all<{ id: string }>('SELECT id FROM reports WHERE id = ANY($1::text[]) AND client_id = $2', `{${ids.map((i) => `"${i}"`).join(',')}}`, clientId)
+    if (ok.length !== ids.length) throw new HttpError(400, 'Some reports were not found in this project')
+  }
+  return [['DELETE FROM roadmap_links WHERE item_id = $1', [itemId]], ...ids.map((rid): Stmt => ['INSERT INTO roadmap_links (item_id, report_id) VALUES ($1, $2)', [itemId, rid]])]
+}
+
+app.post('/api/admin/roadmap', async (c) => {
+  requireAdmin(c)
   const body = await json(c)
   const clientId = text(body.clientId, 'clientId', 100, true)
-  if (!(await one('SELECT id FROM clients WHERE id = $1', clientId))) throw new HttpError(404, 'Client not found')
-  const kind = oneOf(body.kind ?? 'Feature request', KINDS, 'kind')
-  const stage = body.roadmapStage === null ? null : oneOf(body.roadmapStage ?? 'Planned', STAGES, 'roadmapStage')
-  const id = await insertReport({
-    clientId, reporterId: admin.id, title: text(body.title, 'title', 120, true), description: text(body.description, 'description', 4000),
-    pageUrl: '', severity: 'Medium', kind, stage, submittedAt: now(),
-  })
-  await addHistory(id, 'admin', 'created', 'Added by the team')
-  const r = await loadReport(admin, id)
-  if (stage) await mailClient(r, `New on your roadmap: ${r.title}`, [`We added "${r.title}" to your roadmap (${stage}).`])
-  return c.json({ report: await withHistory(r, admin) }, 201)
+  if (!(await one('SELECT id FROM clients WHERE id = $1', clientId))) throw new HttpError(404, 'Project not found')
+  const fields = {
+    title: text(body.title, 'title', 120, true),
+    description: text(body.description, 'description', 2000),
+    state: oneOf(body.state ?? 'Under review', ROADMAP_STATES, 'state'),
+    targetWindow: text(body.targetWindow, 'targetWindow', 60),
+    clientUpdate: text(body.clientUpdate, 'clientUpdate', 1000),
+    published: body.published === true ? 1 : 0, // publishing is always an explicit choice
+  }
+  const links = body.reportIds === undefined ? [] : await linkStatements('', clientId, body.reportIds)
+  let id: string | undefined
+  for (let attempt = 0; attempt < 6 && !id; attempt++) {
+    try {
+      id = (await one<{ id: string }>(
+        `INSERT INTO roadmap_items (id, seq, client_id, title, description, state, target_window, client_update, published, created_at, updated_at)
+         SELECT 'RM-' || LPAD(n::text, 4, '0'), n, $1, $2, $3, $4, $5, $6, $7, $8, $8 FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM roadmap_items) s
+         RETURNING id`,
+        clientId, fields.title, fields.description, fields.state, fields.targetWindow, fields.clientUpdate, fields.published, now(),
+      ))?.id
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e
+    }
+  }
+  if (!id) throw new HttpError(409, 'Could not create the roadmap item, please try again')
+  const itemId = id
+  if (links.length > 1) await batch(links.slice(1).map(([q, p]): Stmt => [q, [itemId, ...p.slice(1)]]))
+  const admin = c.get('user')!
+  const item = await loadItem(admin, itemId)
+  return c.json({ item: serializeItem(item, admin, (await linkedReports([itemId])).get(itemId) ?? []) }, 201)
+})
+
+app.patch('/api/admin/roadmap/:id', async (c) => {
+  const admin = requireAdmin(c)
+  const item = await loadItem(admin, c.req.param('id'))
+  const body = await json(c)
+  const sets: string[] = []
+  const vals: (string | number)[] = []
+  const set = (col: string, v: string | number) => { vals.push(v); sets.push(`${col} = $${vals.length}`) }
+  if ('title' in body) set('title', text(body.title, 'title', 120, true))
+  if ('description' in body) set('description', text(body.description, 'description', 2000))
+  if ('state' in body) set('state', oneOf(body.state, ROADMAP_STATES, 'state'))
+  if ('targetWindow' in body) set('target_window', text(body.targetWindow, 'targetWindow', 60))
+  if ('clientUpdate' in body) set('client_update', text(body.clientUpdate, 'clientUpdate', 1000))
+  if ('published' in body) set('published', body.published === true ? 1 : 0)
+  const stmts: Stmt[] = []
+  if (sets.length) {
+    set('updated_at', now())
+    stmts.push([`UPDATE roadmap_items SET ${sets.join(', ')} WHERE id = $${vals.length + 1}`, [...vals.map(String), item.id]])
+  }
+  if ('reportIds' in body) {
+    const links = await linkStatements(item.id, item.client_id, body.reportIds)
+    stmts.push(...links)
+    stmts.push(['UPDATE roadmap_items SET updated_at = $1 WHERE id = $2', [now(), item.id]])
+  }
+  if (stmts.length) await batch(stmts)
+  const fresh = await loadItem(admin, item.id)
+  return c.json({ item: serializeItem(fresh, admin, (await linkedReports([item.id])).get(item.id) ?? []) })
+})
+
+app.delete('/api/admin/roadmap/:id', async (c) => {
+  const admin = requireAdmin(c)
+  const item = await loadItem(admin, c.req.param('id'))
+  await run('DELETE FROM roadmap_items WHERE id = $1', item.id)
+  return c.json({ ok: true })
 })
 
 // ---------- admin: clients and their users ----------

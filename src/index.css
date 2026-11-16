@@ -1,13 +1,73 @@
 @import "tailwindcss";
+@import "./styles/tokens.css";
 
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --color-brand-50: #eef4ff;
-  --color-brand-100: #dbe7ff;
-  --color-brand-500: #3b6cf6;
-  --color-brand-600: #2755e0;
-  --color-brand-700: #1e43b8;
+/* The SEAM tokens (tokens.css) are the source of truth. This maps them onto Tailwind utilities. */
+@theme inline {
+  --font-sans: var(--seam-font);
+  --font-mono: var(--seam-font-mono);
+
+  --color-forest: var(--seam-forest);
+  --color-terracotta: var(--seam-terracotta);
+  --color-cream: var(--seam-cream);
+  --color-sand: var(--seam-sand);
+
+  --color-canvas: var(--seam-canvas);
+  --color-surface: var(--seam-surface);
+  --color-subtle: var(--seam-surface-subtle);
+  --color-ink: var(--seam-text);
+  --color-muted: var(--seam-text-muted);
+  --color-line: var(--seam-border);
+  --color-control: var(--seam-border-control);
+  --color-action: var(--seam-action);
+  --color-action-hover: var(--seam-action-hover);
+  --color-on-action: var(--seam-on-action);
+  --color-focus: var(--seam-focus);
+
+  --radius-control: var(--seam-radius-control);
+  --radius-card: var(--seam-radius-card);
+  --spacing-sidebar: var(--seam-sidebar-width);
+  --spacing-drawer: var(--seam-drawer-width);
 }
 
-html, body, #root { height: 100%; }
-body { @apply bg-slate-50 text-slate-900 antialiased; }
+html, body, #root { min-height: 100%; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--seam-canvas);
+  color: var(--seam-text);
+  font: var(--seam-type-body-mobile);
+  -webkit-font-smoothing: antialiased;
+}
+@media (min-width: 768px) { body { font: var(--seam-type-body); } }
+
+/* One focus treatment everywhere, with a variant for dark surfaces. */
+:focus-visible { outline: 2px solid var(--seam-focus); outline-offset: 2px; }
+.on-dark :focus-visible { outline-color: var(--seam-focus-on-dark); }
+
+h1 { font: var(--seam-type-page-mobile); }
+h2 { font: var(--seam-type-section); }
+@media (min-width: 768px) { h1 { font: var(--seam-type-page); } }
+
+@layer components {
+  .badge { display: inline-flex; align-items: center; gap: .375rem; border-radius: var(--seam-radius-pill); padding: .125rem .625rem; font-size: .8125rem; line-height: 1.25rem; font-weight: 600; white-space: nowrap; }
+  .badge::before { content: ""; width: .4375rem; height: .4375rem; border-radius: 999px; background: currentColor; }
+  .badge-neutral { background: var(--seam-neutral-bg); color: var(--seam-neutral-fg); }
+  .badge-info { background: var(--seam-info-bg); color: var(--seam-info-fg); }
+  .badge-warning { background: var(--seam-warning-bg); color: var(--seam-warning-fg); }
+  .badge-verify { background: var(--seam-verify-bg); color: var(--seam-verify-fg); }
+  .badge-error { background: var(--seam-error-bg); color: var(--seam-error-fg); }
+  .badge-success { background: var(--seam-success-bg); color: var(--seam-success-fg); }
+
+  .input {
+    width: 100%; background: var(--seam-surface); color: var(--seam-text);
+    border: 1px solid var(--seam-border-control); border-radius: var(--seam-radius-control);
+    min-height: var(--seam-touch-target); padding: .5rem .75rem; font: inherit;
+  }
+  @media (min-width: 768px) { .input { min-height: var(--seam-control-height); } }
+  .input::placeholder { color: #6f7a6d; }
+  .input[aria-invalid="true"] { border-color: var(--seam-error-fg); }
+  textarea.input { min-height: 5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}

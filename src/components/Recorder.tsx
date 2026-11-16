@@ -1,22 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
 import { Circle, Mic, MicOff, RotateCcw, Square, Upload } from 'lucide-react'
-import { btnPrimary, btnSecondary } from './ui'
+import { Button, buttonClass, VideoEvidence } from './ui'
 
 interface Props {
   blob: Blob | null
   onChange: (blob: Blob | null) => void
+  /** From server configuration. The recording stops by itself at this size. */
+  maxMb: number
 }
 
-const MAX_SECONDS = 600
-const MAX_UPLOAD_MB = 500
-
+const ACCEPTED = ['video/webm', 'video/mp4', 'video/quicktime', 'video/ogg', 'video/x-matroska', 'video/3gpp']
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`
 
-export function Recorder({ blob, onChange }: Props) {
+export function Recorder({ blob, onChange, maxMb }: Props) {
   const [recording, setRecording] = useState(false)
   const [seconds, setSeconds] = useState(0)
   const [narrate, setNarrate] = useState(true)
   const [error, setError] = useState('')
+  const [note, setNote] = useState('')
+  const [source, setSource] = useState<{ kind: 'recorded' | 'uploaded'; name: string } | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const recorder = useRef<MediaRecorder | null>(null)
   const streams = useRef<MediaStream[]>([])
@@ -41,6 +44,7 @@ export function Recorder({ blob, onChange }: Props) {
 
   async function start() {
     setError('')
+    setNote('')
     try {
       const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
       streams.current = [screen]
@@ -51,33 +55,46 @@ export function Recorder({ blob, onChange }: Props) {
           streams.current.push(mic)
           tracks.push(...mic.getAudioTracks())
         } catch {
-          setError('Microphone not available, recording without narration.')
+          // A microphone problem never blocks the recording.
+          setNote('We could not use your microphone, so this recording has no narration. You can still describe the problem in the details.')
         }
       }
       const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m))
       const rec = new MediaRecorder(new MediaStream(tracks), mime ? { mimeType: mime } : undefined)
       const chunks: BlobPart[] = []
-      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data)
+      let bytes = 0
+      rec.ondataavailable = (e) => {
+        if (!e.data.size) return
+        chunks.push(e.data)
+        bytes += e.data.size
+        if (bytes > maxMb * 1024 * 1024 * 0.95 && rec.state !== 'inactive') {
+          setNote(`The recording reached the ${maxMb} MB limit and stopped. You can send it as it is.`)
+          rec.stop()
+        }
+      }
       rec.onstop = () => {
-        onChange(new Blob(chunks, { type: rec.mimeType || 'video/webm' }))
+        const out = new Blob(chunks, { type: rec.mimeType || 'video/webm' })
+        setSource({ kind: 'recorded', name: 'Screen recording' })
+        onChange(out)
         setRecording(false)
         cleanup()
       }
+      // Stopping the browser's own "stop sharing" button ends the recording cleanly.
       screen.getVideoTracks()[0].addEventListener('ended', () => rec.state !== 'inactive' && rec.stop())
       rec.start(1000)
       recorder.current = rec
       setSeconds(0)
       setRecording(true)
-      timer.current = window.setInterval(() => {
-        setSeconds((s) => {
-          if (s + 1 >= MAX_SECONDS) rec.state !== 'inactive' && rec.stop()
-          return s + 1
-        })
-      }, 1000)
+      timer.current = window.setInterval(() => setSeconds((s) => s + 1), 1000)
     } catch (e) {
       cleanup()
       setRecording(false)
-      setError(e instanceof DOMException && e.name === 'NotAllowedError' ? 'Screen sharing was cancelled.' : 'Could not start recording in this browser.')
+      const name = e instanceof DOMException ? e.name : ''
+      setError(
+        name === 'NotAllowedError'
+          ? 'Screen sharing was cancelled or blocked. Allow screen sharing in your browser and try again, or upload a video instead.'
+          : 'We could not start the recording in this browser. Upload a video instead.',
+      )
     }
   }
 
@@ -87,71 +104,70 @@ export function Recorder({ blob, onChange }: Props) {
 
   function onFile(file: File | undefined) {
     if (!file) return
-    if (!file.type.startsWith('video/')) return setError('Please choose a video file.')
-    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return setError(`That file is larger than ${MAX_UPLOAD_MB} MB.`)
+    setNote('')
+    if (!ACCEPTED.includes(file.type)) return setError('That file type is not supported. Use a WebM, MP4 or MOV video.')
+    if (file.size > maxMb * 1024 * 1024) return setError(`That file is ${mb(file.size)}. The limit is ${maxMb} MB.`)
     setError('')
+    setSource({ kind: 'uploaded', name: file.name })
     onChange(file)
   }
+
+  const fileInput = (label: string, variant: 'primary' | 'secondary' = 'secondary') => (
+    <label className={`${buttonClass(variant)} cursor-pointer focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus`}>
+      <Upload className="h-4 w-4" aria-hidden="true" />{label}
+      <input type="file" accept="video/*" className="sr-only" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = '' }} />
+    </label>
+  )
 
   if (blob && previewUrl) {
     return (
       <div className="space-y-3">
-        <video src={previewUrl} controls className="aspect-video w-full rounded-lg bg-black" />
-        <div className="flex items-center justify-between text-sm text-slate-600">
-          <span>{(blob.size / 1024 / 1024).toFixed(1)} MB ready to send</span>
-          <button type="button" className={btnSecondary} onClick={() => onChange(null)}>
-            <RotateCcw className="h-4 w-4" /> Record again
-          </button>
+        <VideoEvidence src={previewUrl} title="Preview of your video" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="min-w-0 text-sm text-muted"><span className="font-semibold text-ink">{source?.name ?? 'Video'}</span> · {mb(blob.size)} ready to send</p>
+          <div className="flex gap-2">
+            {source?.kind === 'recorded' && <Button variant="secondary" onClick={() => { onChange(null); setSource(null); start() }}><RotateCcw className="h-4 w-4" aria-hidden="true" />Re-record</Button>}
+            {source?.kind === 'uploaded' ? fileInput('Replace file') : <Button variant="tertiary" onClick={() => { onChange(null); setSource(null) }}>Remove</Button>}
+          </div>
         </div>
+        {note && <p className="text-sm text-muted">{note}</p>}
+        {error && <p role="alert" className="text-sm font-medium text-[var(--seam-error-fg)]">{error}</p>}
       </div>
     )
   }
 
   if (recording) {
     return (
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-red-200 bg-red-50 p-8">
-        <div className="flex items-center gap-2 text-red-700">
-          <span className="h-3 w-3 animate-pulse rounded-full bg-red-600" />
-          <span className="text-lg font-semibold tabular-nums">{fmt(seconds)}</span>
-          <span className="text-sm text-red-600">/ {fmt(MAX_SECONDS)} max</span>
-        </div>
-        <p className="text-sm text-slate-600">Recording your screen. Show the problem, then stop.</p>
-        <button type="button" onClick={stop} className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-red-700">
-          <Square className="h-4 w-4 fill-current" /> Stop recording
-        </button>
+      <div className="rounded-card border border-[var(--seam-error-fg)]/40 bg-[var(--seam-error-bg)] p-6 text-center" role="status">
+        <p className="flex items-center justify-center gap-2 font-semibold text-[var(--seam-error-fg)]">
+          <span className="h-3 w-3 animate-pulse rounded-full bg-[var(--seam-error-fg)]" aria-hidden="true" />
+          Recording <span className="font-mono tabular-nums">{fmt(seconds)}</span>
+        </p>
+        <p className="mt-1 text-muted">Show the problem, then stop. It stops by itself at {maxMb} MB.</p>
+        <Button variant="danger" onClick={stop} className="mt-4"><Square className="h-4 w-4 fill-current" aria-hidden="true" />Stop recording</Button>
       </div>
     )
   }
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white p-8 text-center">
-        {supported ? (
-          <>
-            <button type="button" onClick={start} className={`${btnPrimary} px-5 py-2.5`}>
-              <Circle className="h-4 w-4 fill-current" /> Start screen recording
-            </button>
-            <button
-              type="button"
-              onClick={() => setNarrate((n) => !n)}
-              className="mx-auto mt-3 flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900"
-            >
-              {narrate ? <Mic className="h-4 w-4 text-brand-600" /> : <MicOff className="h-4 w-4" />}
-              {narrate ? 'Narration on: talk while you show the issue' : 'Narration off'}
-            </button>
-          </>
-        ) : (
-          <p className="text-sm text-slate-600">Screen recording is not supported in this browser. Please upload a video instead.</p>
-        )}
-        <div className="my-4 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
-          <span className="h-px flex-1 bg-slate-200" /> or <span className="h-px flex-1 bg-slate-200" />
+    <div>
+      <div className="rounded-card border border-dashed border-control bg-surface p-5">
+        <div className="flex flex-wrap items-center gap-3">
+          {supported && <Button onClick={start}><Circle className="h-4 w-4 fill-current" aria-hidden="true" />Record screen</Button>}
+          {fileInput(supported ? 'Upload video' : 'Upload a video', supported ? 'secondary' : 'primary')}
         </div>
-        <label className={`${btnSecondary} cursor-pointer`}>
-          <Upload className="h-4 w-4" /> Upload a video file
-          <input type="file" accept="video/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
-        </label>
+        {supported ? (
+          <button type="button" onClick={() => setNarrate((n) => !n)} aria-pressed={narrate} className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-control text-sm text-muted hover:text-ink">
+            {narrate ? <Mic className="h-4 w-4 text-action" aria-hidden="true" /> : <MicOff className="h-4 w-4" aria-hidden="true" />}
+            {narrate ? 'Microphone on. Talk while you show the problem.' : 'Microphone off. The recording will have no narration.'}
+          </button>
+        ) : (
+          <p className="mt-3 text-sm text-muted">Screen recording is not available on this device or browser. Upload a video from your phone or computer instead.</p>
+        )}
+        <p className="mt-2 text-xs text-muted">WebM, MP4 or MOV, up to {maxMb} MB.</p>
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {note && <p className="mt-2 text-sm text-muted">{note}</p>}
+      {error && <p role="alert" className="mt-2 text-sm font-medium text-[var(--seam-error-fg)]">{error}</p>}
     </div>
   )
 }

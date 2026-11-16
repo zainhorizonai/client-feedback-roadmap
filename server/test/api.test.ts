@@ -174,8 +174,9 @@ describe('portal API', () => {
 
     const texts: string[] = fixed.data.report.history.map((h: Json) => h.text)
     assert.ok(texts.includes('Working on it'))
-    assert.ok(texts.includes('Client confirmed the fix'))
-    assert.ok(texts.some((t) => t.includes('still broken: still fails') || t.includes('still broken')))
+    assert.ok(texts.includes('Verified by client'))
+    assert.ok(texts.some((t) => t.includes('Still broken: still fails')))
+    assert.ok(fixed.data.report.history.some((h: Json) => h.kind === 'status' && h.from === 'Ready to verify' && h.to === 'Resolved'), 'transition stored with old and new value')
   })
 
   it('lets clients comment and admins see it', async () => {
@@ -513,8 +514,8 @@ describe('optional video, item types and the roadmap', () => {
     const mine = (await jane.json('GET', '/api/reports')).data.reports as Json[]
     assert.ok(mine.some((x) => x.id === r.data.report.id), 'visible to the client at once')
     assert.ok(((await admin.json('GET', '/api/reports')).data.reports as Json[]).some((x) => x.id === r.data.report.id), 'visible to the admin')
-    assert.ok(mails.some((m) => /No video bug/.test(m.subject) && m.to.includes('admin@test.com')), 'admin emailed')
-    assert.ok(mails.some((m) => /We received/.test(m.subject) && m.to.includes('jane@acme.com')), 'client got a receipt')
+    assert.ok(mails.some((m) => /^New report from Acme · BUG-\d+/.test(m.subject) && m.to.includes('admin@test.com') && /No video bug/.test(m.text)), 'admin emailed')
+    assert.ok(mails.some((m) => /^We received your report · BUG-\d+/.test(m.subject) && m.to.includes('jane@acme.com')), 'client got a receipt')
   })
 
   it('cannot attach a video to a report that was already submitted', async () => {
@@ -530,10 +531,9 @@ describe('optional video, item types and the roadmap', () => {
     assert.equal(list.some((x) => x.id === created.data.report.id), false)
   })
 
-  it('puts feature requests on the roadmap as Under review, and bugs off it', async () => {
+  it('gives each type its own id prefix and never puts a report on the roadmap by itself', async () => {
     const feat = await jane.json('POST', '/api/reports', { title: 'Dark mode', kind: 'Feature request', withVideo: false })
     assert.equal(feat.data.report.kind, 'Feature request')
-    assert.equal(feat.data.report.roadmapStage, 'Under review')
     assert.match(feat.data.report.id, /^REQ-\d{4}$/)
     const q = await jane.json('POST', '/api/reports', { title: 'How?', kind: 'Question', withVideo: false })
     assert.match(q.data.report.id, /^Q-\d{4}$/)
@@ -541,51 +541,93 @@ describe('optional video, item types and the roadmap', () => {
     assert.match(uat.data.report.id, /^UAT-\d{4}$/)
     const nums = [feat, q, uat].map((x) => Number(x.data.report.id.split('-')[1]))
     assert.equal(new Set(nums).size, 3, 'numbers are unique across types')
-    const bug = await jane.json('POST', '/api/reports', { title: 'A bug', withVideo: false })
-    assert.equal(bug.data.report.roadmapStage, undefined)
     assert.equal((await jane.json('POST', '/api/reports', { title: 'x', kind: 'Rant', withVideo: false })).status, 400)
+    assert.equal(((await jane.json('GET', '/api/roadmap')).data.items as Json[]).length, 0, 'nothing is published automatically')
   })
 
-  it('lets only admins move items on the roadmap, notifies the client, and logs it', async () => {
-    const id = ((await jane.json('POST', '/api/reports', { title: 'Export to CSV', kind: 'Feature request', withVideo: false })).data.report as Json).id
-    assert.equal((await jane.json('PATCH', `/api/reports/${id}`, { roadmapStage: 'Done' })).status, 403)
-    assert.equal((await admin.json('PATCH', `/api/reports/${id}`, { roadmapStage: 'Someday' })).status, 400)
+  it('walks Needs client input, emailing the client, and skips email for Triaging', async () => {
+    const id = ((await jane.json('POST', '/api/reports', { title: 'Needs info', withVideo: false })).data.report as Json).id
     mails.length = 0
-    const moved = await admin.json('PATCH', `/api/reports/${id}`, { roadmapStage: 'Planned' })
-    assert.equal(moved.data.report.roadmapStage, 'Planned')
-    assert.ok(moved.data.report.history.some((h: Json) => /Under review to Planned/.test(h.text)))
-    assert.ok(mails.some((m) => /Planned/.test(m.subject) && m.to.includes('jane@acme.com')))
-    const off = await admin.json('PATCH', `/api/reports/${id}`, { roadmapStage: null })
-    assert.equal(off.data.report.roadmapStage, undefined)
+    await admin.json('PATCH', `/api/reports/${id}`, { status: 'Triaging' })
+    assert.equal(mails.length, 0, 'Triaging sends no default email')
+    const r = await admin.json('PATCH', `/api/reports/${id}`, { status: 'Needs client input' })
+    assert.equal(r.status, 200)
+    assert.ok(mails.some((m) => m.subject === `${id} is Needs client input` && m.to.includes('jane@acme.com')))
+    mails.length = 0
+    await admin.json('PATCH', `/api/reports/${id}`, { status: 'Resolved' })
+    assert.ok(mails.some((m) => m.subject === `${id} is Resolved`))
+    const hist = ((await admin.json('GET', `/api/reports/${id}`)).data.report.history) as Json[]
+    assert.ok(hist.some((h) => h.kind === 'outcome' && h.text === 'Closed by admin'))
+    const reopened = await admin.json('PATCH', `/api/reports/${id}`, { status: 'In progress' })
+    assert.equal(reopened.data.report.resolvedAt, undefined, 'reopening clears the resolved date')
+    assert.ok(reopened.data.report.history.some((h: Json) => h.text === 'Closed by admin'), 'earlier closure stays in history')
   })
 
-  it('lets an admin add a roadmap item for a client, visible only to that client', async () => {
-    mails.length = 0
-    const made = await admin.json('POST', '/api/admin/items', { clientId: acme, title: 'Mobile app', description: 'Q2', roadmapStage: 'In progress' })
+  it('manages roadmap items as admin only, and publishing is always explicit', async () => {
+    assert.equal((await jane.json('POST', '/api/admin/roadmap', { clientId: acme, title: 'x' })).status, 403)
+    assert.equal((await admin.json('POST', '/api/admin/roadmap', { clientId: 'nope', title: 'x' })).status, 404)
+    assert.equal((await admin.json('POST', '/api/admin/roadmap', { clientId: acme, title: '' })).status, 400)
+    assert.equal((await admin.json('POST', '/api/admin/roadmap', { clientId: acme, title: 'x', state: 'Someday' })).status, 400)
+    const made = await admin.json('POST', '/api/admin/roadmap', { clientId: acme, title: 'Checkout reliability', description: 'Public text', state: 'In progress', targetWindow: 'Q1' })
     assert.equal(made.status, 201)
-    const id = made.data.report.id
-    assert.equal(made.data.report.kind, 'Feature request')
-    assert.equal(made.data.report.roadmapStage, 'In progress')
-    assert.equal(made.data.report.hasVideo, false)
-    assert.ok(((await jane.json('GET', '/api/reports')).data.reports as Json[]).some((x) => x.id === id))
-    assert.equal(((await sam.json('GET', '/api/reports')).data.reports as Json[]).some((x) => x.id === id), false)
-    assert.equal((await sam.json('GET', `/api/reports/${id}`)).status, 404)
-    assert.ok(mails.some((m) => /Mobile app/.test(m.subject) && m.to.includes('jane@acme.com')), 'client users emailed, not the admin')
-    assert.equal(mails.some((m) => m.to.includes('admin@test.com') && /Mobile app/.test(m.subject)), false)
+    assert.match(made.data.item.id, /^RM-\d{4}$/)
+    assert.equal(made.data.item.published, false, 'not published unless asked')
+    assert.equal(((await jane.json('GET', '/api/roadmap')).data.items as Json[]).some((i) => i.id === made.data.item.id), false, 'hidden from the client until published')
+    assert.equal((await jane.json('GET', '/api/roadmap')).status, 200)
   })
 
-  it('refuses item creation by clients and for unknown clients', async () => {
-    assert.equal((await jane.json('POST', '/api/admin/items', { clientId: acme, title: 'x' })).status, 403)
-    assert.equal((await admin.json('POST', '/api/admin/items', { clientId: 'nope', title: 'x' })).status, 404)
-    assert.equal((await admin.json('POST', '/api/admin/items', { clientId: globex, title: '' })).status, 400)
+  it('shows clients only published items from their own project, with no private detail', async () => {
+    const a = (await admin.json('POST', '/api/admin/roadmap', { clientId: acme, title: 'Acme public', description: 'for Acme', state: 'Planned', published: true, clientUpdate: 'Starting soon' })).data.item
+    const g = (await admin.json('POST', '/api/admin/roadmap', { clientId: globex, title: 'Globex public', state: 'Planned', published: true })).data.item
+    const mine = (await jane.json('GET', '/api/roadmap')).data.items as Json[]
+    assert.ok(mine.some((i) => i.id === a.id))
+    assert.equal(mine.some((i) => i.id === g.id), false, 'never another project')
+    const item = mine.find((i) => i.id === a.id)!
+    assert.equal(item.clientUpdate, 'Starting soon')
+    for (const hidden of ['reports', 'published', 'clientName', 'reporterEmail', 'notes']) assert.equal(hidden in item, false, `${hidden} must not reach clients`)
+    assert.equal((await sam.json('GET', '/api/roadmap')).data.items.some((i: Json) => i.id === a.id), false)
+    // Admins see everything and can filter by project.
+    const all = (await admin.json('GET', '/api/roadmap')).data.items as Json[]
+    assert.ok(all.some((i) => i.id === a.id) && all.some((i) => i.id === g.id))
+    const onlyGlobex = (await admin.json('GET', `/api/roadmap?clientId=${globex}`)).data.items as Json[]
+    assert.ok(onlyGlobex.every((i) => i.clientId === globex))
   })
 
-  it('emails the client team when the admin replies on a team-created item', async () => {
-    const id = ((await admin.json('POST', '/api/admin/items', { clientId: acme, title: 'Reports module' })).data.report as Json).id
+  it('links reports to an item without exposing them, and moving the item never changes a report', async () => {
+    const r1 = ((await jane.json('POST', '/api/reports', { title: 'Checkout A', withVideo: false })).data.report as Json).id
+    const r2 = ((await jane.json('POST', '/api/reports', { title: 'Checkout B', withVideo: false })).data.report as Json).id
+    const other = ((await sam.json('POST', '/api/reports', { title: 'Globex bug', withVideo: false })).data.report as Json).id
+    const item = (await admin.json('POST', '/api/admin/roadmap', { clientId: acme, title: 'Checkout work', state: 'Planned', published: true, reportIds: [r1, r2] })).data.item
+    assert.deepEqual((item.reports as Json[]).map((x) => x.id).sort(), [r1, r2].sort())
+
+    assert.equal((await admin.json('PATCH', `/api/admin/roadmap/${item.id}`, { reportIds: [other] })).status, 400, 'cannot link another project\'s report')
+    assert.equal((await admin.json('PATCH', `/api/admin/roadmap/${item.id}`, { reportIds: ['BUG-0001"; DROP'] })).status, 400)
+
+    const seen = ((await jane.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => i.id === item.id)!
+    assert.equal(seen.linkedCount, 2)
+    assert.equal('reports' in seen, false)
+
+    await admin.json('PATCH', `/api/admin/roadmap/${item.id}`, { state: 'Done' })
+    const rep = (await admin.json('GET', `/api/reports/${r1}`)).data.report
+    assert.equal(rep.status, 'New', 'Done on the item does not resolve its reports')
+    assert.deepEqual((rep.roadmapItems as Json[]).map((x) => x.id), [item.id], 'drawer shows related roadmap work to admins')
+    const clientView = (await jane.json('GET', `/api/reports/${r1}`)).data.report
+    assert.equal('roadmapItems' in clientView, false, 'clients never see roadmap links on a report')
+
+    // Updating, unlinking, unpublishing and deleting
+    const upd = await admin.json('PATCH', `/api/admin/roadmap/${item.id}`, { reportIds: [r1], published: false, targetWindow: 'Q2', clientUpdate: 'Shipped' })
+    assert.equal(upd.data.item.reports.length, 1)
+    assert.equal(((await jane.json('GET', '/api/roadmap')).data.items as Json[]).some((i) => i.id === item.id), false, 'unpublished again')
+    assert.equal((await jane.json('PATCH', `/api/admin/roadmap/${item.id}`, { state: 'Done' })).status, 403)
+    assert.equal((await admin.json('DELETE', `/api/admin/roadmap/${item.id}`)).status, 200)
+    assert.equal((await admin.json('GET', `/api/reports/${r1}`)).status, 200, 'deleting an item leaves its reports')
+  })
+
+  it('does not email anyone when roadmap items change', async () => {
     mails.length = 0
-    await admin.json('POST', `/api/reports/${id}/replies`, { text: 'Scoping this now' })
-    assert.ok(mails.some((m) => /New reply/.test(m.subject) && m.to.includes('jane@acme.com')))
-    assert.equal(mails.some((m) => m.to.includes('admin@test.com')), false, 'never emails the admin about their own reply')
+    const it = (await admin.json('POST', '/api/admin/roadmap', { clientId: acme, title: 'Quiet change', published: true })).data.item
+    await admin.json('PATCH', `/api/admin/roadmap/${it.id}`, { state: 'Done', clientUpdate: 'x' })
+    assert.equal(mails.length, 0, 'only followers are emailed, and following is not built')
   })
 
   it('cleans up', async () => {
@@ -594,5 +636,36 @@ describe('optional video, item types and the roadmap', () => {
     setMailTransportForTests(null)
     config.emailProvider = 'console'
     config.smtpUser = ''
+  })
+})
+
+describe('upgrade from the earlier roadmap model', () => {
+  it('turns old report roadmap stages into published, linked roadmap items exactly once', async () => {
+    const { migrateLegacyRoadmap, all, one, run, batch } = await import('../db.js')
+    const driver = {
+      query: async (t: string, p: (string | number | null)[]) => (await all(t, ...p)) as Record<string, unknown>[],
+      batch: async (b: [string, (string | null)[]][]) => batch(b),
+    }
+    const admin = new Client()
+    await admin.signIn('admin@test.com')
+    const client = (await one<{ id: string }>("SELECT id FROM clients WHERE name = 'Acme'"))!.id
+    const jane = (await one<{ id: string }>("SELECT id FROM users WHERE email = 'jane@acme.com'"))!.id
+    await run(
+      `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, kind, roadmap_stage, submitted_at)
+       VALUES ('REQ-9001', 9001, '2026-01-01T00:00:00.000Z', $1, $2, 'Legacy request', 'old text', 'Feature request', 'Planned', '2026-01-01T00:00:00.000Z')`,
+      client, jane,
+    )
+    await migrateLegacyRoadmap(driver)
+    const item = await one<{ id: string; state: string; published: number; title: string }>(
+      "SELECT i.* FROM roadmap_items i JOIN roadmap_links l ON l.item_id = i.id WHERE l.report_id = 'REQ-9001'",
+    )
+    assert.equal(item?.title, 'Legacy request')
+    assert.equal(item?.state, 'Planned')
+    assert.equal(item?.published, 1, 'clients could already see it, so it stays visible')
+    assert.equal((await one<{ roadmap_stage: string | null }>("SELECT roadmap_stage FROM reports WHERE id = 'REQ-9001'"))?.roadmap_stage, null)
+
+    const before = (await all('SELECT id FROM roadmap_items')).length
+    await migrateLegacyRoadmap(driver)
+    assert.equal((await all('SELECT id FROM roadmap_items')).length, before, 'running again changes nothing')
   })
 })

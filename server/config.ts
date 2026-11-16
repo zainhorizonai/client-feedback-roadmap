@@ -61,7 +61,7 @@ export const config = {
   smtpUser: env.SMTP_USER ?? '',
   smtpPass: (env.SMTP_PASS ?? '').replace(/\s+/g, ''),
   resendKey: env.RESEND_API_KEY ?? '',
-  emailFrom: env.EMAIL_FROM ?? 'Feedback Portal <onboarding@resend.dev>',
+  emailFrom: env.EMAIL_FROM ?? 'SEAM <onboarding@resend.dev>',
   maxVideoBytes: Number(env.MAX_VIDEO_MB ?? 500) * 1024 * 1024,
   isProd: env.NODE_ENV === 'production',
   secureCookies: appUrl.startsWith('https://'),

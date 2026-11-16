@@ -6,14 +6,18 @@ interface Mail { to: string | string[]; subject: string; text: string; html: str
 export const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
-/** Wraps a message body and optional button in a plain branded layout. */
+/**
+ * SEAM email layout: wordmark, a terracotta rule, plain text and one action. Email clients cannot be
+ * relied on to draw SVG, so the wordmark is text.
+ */
 export function layout(heading: string, bodyHtml: string, button?: { label: string; url: string }) {
   const btn = button
-    ? `<p style="margin:24px 0"><a href="${escapeHtml(button.url)}" style="background:#2755e0;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;display:inline-block">${escapeHtml(button.label)}</a></p>`
+    ? `<p style="margin:24px 0 0"><a href="${escapeHtml(button.url)}" style="background:#A3402C;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600;display:inline-block">${escapeHtml(button.label)}</a></p>`
     : ''
-  return `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
-<h2 style="margin:0 0 12px;font-size:18px">${escapeHtml(heading)}</h2>${bodyHtml}${btn}
-<p style="color:#64748b;font-size:12px;margin-top:32px">Feedback Portal</p></div>`
+  return `<div style="background:#F6F2E9;padding:24px 12px"><div style="font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #D6CBBB;border-radius:10px;overflow:hidden;color:#172E26">
+<div style="padding:20px 24px 16px;border-bottom:3px solid #A3402C"><span style="font-size:20px;font-weight:700;letter-spacing:.18em;color:#172E26">SEAM</span></div>
+<div style="padding:24px;font-size:15px;line-height:1.55"><h2 style="margin:0 0 14px;font-size:20px;line-height:1.3">${escapeHtml(heading)}</h2>${bodyHtml}${btn}</div>
+<div style="padding:14px 24px;background:#F6F2E9;color:#536254;font-size:12px">From client feedback to what ships.</div></div></div>`
 }
 
 interface MailTransport { sendMail(m: { from: string; to: string[]; subject: string; text: string; html: string }): Promise<unknown> }
@@ -47,7 +51,7 @@ export async function sendEmail(mail: Mail): Promise<void> {
   if (to.length === 0) return
   if (config.emailProvider === 'smtp') {
     // Gmail always sends as the signed-in account, whatever the From says, so default to that account.
-    const from = process.env.EMAIL_FROM ?? `Feedback Portal <${config.smtpUser}>`
+    const from = process.env.EMAIL_FROM ?? `SEAM <${config.smtpUser}>`
     await (await getSmtp()).sendMail({ from, to, subject: mail.subject, text: mail.text, html: mail.html })
     return
   }
