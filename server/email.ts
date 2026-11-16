@@ -15,9 +15,41 @@ export function layout(heading: string, bodyHtml: string, button?: { label: stri
 <p style="color:#64748b;font-size:12px;margin-top:32px">Feedback Portal</p></div>`
 }
 
+interface MailTransport { sendMail(m: { from: string; to: string[]; subject: string; text: string; html: string }): Promise<unknown> }
+let smtpTransport: MailTransport | null = null
+
+async function getSmtp(): Promise<MailTransport> {
+  if (!smtpTransport) {
+    if (!config.smtpUser || !config.smtpPass) throw new Error('EMAIL_PROVIDER=smtp but SMTP_USER or SMTP_PASS is not set')
+    const nodemailer = await import('nodemailer')
+    smtpTransport = nodemailer.createTransport({
+      host: config.smtpHost,
+      port: config.smtpPort,
+      secure: config.smtpPort === 465,
+      auth: { user: config.smtpUser, pass: config.smtpPass },
+      // Fail fast so a bad setting cannot hang a request until the function times out.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
+    })
+  }
+  return smtpTransport
+}
+
+/** Tests swap in a fake transport. */
+export function setMailTransportForTests(t: MailTransport | null) {
+  smtpTransport = t
+}
+
 export async function sendEmail(mail: Mail): Promise<void> {
   const to = Array.isArray(mail.to) ? mail.to : [mail.to]
   if (to.length === 0) return
+  if (config.emailProvider === 'smtp') {
+    // Gmail always sends as the signed-in account, whatever the From says, so default to that account.
+    const from = process.env.EMAIL_FROM ?? `Feedback Portal <${config.smtpUser}>`
+    await (await getSmtp()).sendMail({ from, to, subject: mail.subject, text: mail.text, html: mail.html })
+    return
+  }
   if (config.emailProvider === 'resend') {
     if (!config.resendKey) throw new Error('EMAIL_PROVIDER=resend but RESEND_API_KEY is not set')
     const res = await fetch('https://api.resend.com/emails', {
@@ -33,13 +65,16 @@ export async function sendEmail(mail: Mail): Promise<void> {
 
 /**
  * Sends and swallows errors: a failed email must never fail the request that triggered it.
+ * Returns whether it was sent, so callers that can tell the user (like invites) do.
  * Callers must await this. On serverless the function is frozen once the response is sent,
  * so a fire-and-forget email can be lost.
  */
-export async function sendQuietly(mail: Mail): Promise<void> {
+export async function sendQuietly(mail: Mail): Promise<boolean> {
   try {
     await sendEmail(mail)
+    return true
   } catch (e) {
     console.error('[email] failed:', e instanceof Error ? e.message : e)
+    return false
   }
 }

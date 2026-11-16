@@ -354,3 +354,54 @@ describe('setup helpers', () => {
     assert.equal(JSON.stringify(ok.data).includes('test-cron-secret'), false)
   })
 })
+
+describe('SMTP email (Gmail)', () => {
+  it('sends through the SMTP transport, and reports failure without throwing', async () => {
+    const { config } = await import('../config.js')
+    const { sendEmail, sendQuietly, setMailTransportForTests } = await import('../email.js')
+    const sent: Json[] = []
+    const prev = { provider: config.emailProvider, user: config.smtpUser }
+    config.emailProvider = 'smtp'
+    config.smtpUser = 'sender@gmail.com'
+    try {
+      setMailTransportForTests({ sendMail: async (m) => { sent.push(m); return {} } })
+      await sendEmail({ to: ['a@x.com', 'b@x.com'], subject: 'Hello', text: 't', html: '<p>t</p>' })
+      assert.equal(sent.length, 1)
+      assert.deepEqual(sent[0].to, ['a@x.com', 'b@x.com'])
+      assert.equal(sent[0].subject, 'Hello')
+      assert.match(sent[0].from, /sender@gmail\.com/)
+
+      assert.equal(await sendQuietly({ to: 'a@x.com', subject: 's', text: 't', html: 't' }), true)
+      setMailTransportForTests({ sendMail: async () => { throw new Error('Invalid login') } })
+      assert.equal(await sendQuietly({ to: 'a@x.com', subject: 's', text: 't', html: 't' }), false)
+    } finally {
+      setMailTransportForTests(null)
+      config.emailProvider = prev.provider
+      config.smtpUser = prev.user
+    }
+  })
+
+  it('tells the admin when an invitation email could not be sent', async () => {
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    const admin = new Client()
+    await admin.signIn('admin@test.com')
+    const cl = (await admin.json('POST', '/api/admin/clients', { name: 'Mail test' })).data.client.id
+    const prev = config.emailProvider
+    config.emailProvider = 'smtp'
+    config.smtpUser = 'sender@gmail.com'
+    try {
+      setMailTransportForTests({ sendMail: async () => { throw new Error('nope') } })
+      const bad = await admin.json('POST', `/api/admin/clients/${cl}/users`, { email: 'fail@x.com', name: 'F' })
+      assert.equal(bad.status, 201)
+      assert.equal(bad.data.emailSent, false)
+      setMailTransportForTests({ sendMail: async () => ({}) })
+      const good = await admin.json('POST', `/api/admin/clients/${cl}/users`, { email: 'ok@x.com', name: 'O' })
+      assert.equal(good.data.emailSent, true)
+    } finally {
+      setMailTransportForTests(null)
+      config.emailProvider = prev
+      config.smtpUser = ''
+    }
+  })
+})

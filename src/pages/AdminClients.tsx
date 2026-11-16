@@ -30,8 +30,9 @@ export function AdminClients() {
   async function invite(e: React.FormEvent, clientId: string) {
     e.preventDefault()
     try {
-      await api.post(`/api/admin/clients/${clientId}/users`, { name: uName, email: uEmail })
-      notify(`Invitation sent to ${uEmail}.`)
+      const r = await api.post<{ emailSent?: boolean }>(`/api/admin/clients/${clientId}/users`, { name: uName, email: uEmail })
+      if (r.emailSent === false) notify(`${uEmail} was added, but the invitation email could not be sent. They can still sign in from the home page once email is working.`, 'error')
+      else notify(`Invitation sent to ${uEmail}.`)
       setUName(''); setUEmail(''); setInviting(null)
       await load()
     } catch (err) { notify(err instanceof ApiError ? err.message : 'Failed', 'error') }

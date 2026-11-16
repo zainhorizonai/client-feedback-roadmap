@@ -9,12 +9,11 @@ React + Vite frontend, Hono API on Vercel Functions, Postgres (Neon), videos in 
 1. **Push this repo to GitHub** and import it in Vercel (**Add New > Project**). The framework is detected as Vite. `vercel.json` already sets the build, routing and the nightly cron.
 2. **Add a database.** In the project: **Storage > Create > Neon (Postgres)**. This adds `DATABASE_URL` automatically. Tables are created on first request, there is nothing to run.
 3. **Add file storage.** **Storage > Create > Blob**, and choose **Private** access. This adds `BLOB_READ_WRITE_TOKEN` automatically.
-4. **Set email.** Create a [Resend](https://resend.com) account, verify your sending domain, then add these environment variables:
-   - `EMAIL_PROVIDER` = `resend`
-   - `RESEND_API_KEY` = your key
-   - `EMAIL_FROM` = `Feedback Portal <portal@yourdomain.com>`
+4. **Set email.** Pick one:
+   - **Gmail (no domain needed):** turn on 2-Step Verification for the Google account, create an **App password** (Google Account > Security > App passwords), then set `EMAIL_PROVIDER` = `smtp`, `SMTP_USER` = the Gmail address, `SMTP_PASS` = the 16-character app password, and `EMAIL_FROM` = `Feedback Portal <that address>`. Gmail allows roughly 500 emails a day.
+   - **Resend:** set `EMAIL_PROVIDER` = `resend`, `RESEND_API_KEY` and `EMAIL_FROM`. Without a verified domain, Resend only delivers to the address you signed up with.
 
-   Without this, sign-in links are only logged and nobody can sign in.
+   Without working email, sign-in links are only logged and nobody can sign in.
 5. **Set the rest** (Project Settings > Environment Variables):
    - `ADMIN_EMAILS` = your email (comma-separate more). These people become admins the first time they sign in.
    - `CRON_SECRET` = any long random string. Enables the nightly cleanup of abandoned drafts and expired sign-in data.

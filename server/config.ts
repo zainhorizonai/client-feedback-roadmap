@@ -54,7 +54,12 @@ export const config = {
   cronSecret: env.CRON_SECRET ?? '',
   // ADMIN_EMAIL (singular) is accepted too, since it is an easy slip.
   adminEmails: (env.ADMIN_EMAILS ?? env.ADMIN_EMAIL ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
-  emailProvider: (env.EMAIL_PROVIDER ?? 'console') as 'console' | 'resend',
+  emailProvider: (env.EMAIL_PROVIDER ?? 'console') as 'console' | 'resend' | 'smtp',
+  // SMTP defaults suit Gmail. Use an app password, not your normal password.
+  smtpHost: env.SMTP_HOST ?? 'smtp.gmail.com',
+  smtpPort: Number(env.SMTP_PORT ?? 465),
+  smtpUser: env.SMTP_USER ?? '',
+  smtpPass: (env.SMTP_PASS ?? '').replace(/\s+/g, ''),
   resendKey: env.RESEND_API_KEY ?? '',
   emailFrom: env.EMAIL_FROM ?? 'Feedback Portal <onboarding@resend.dev>',
   maxVideoBytes: Number(env.MAX_VIDEO_MB ?? 500) * 1024 * 1024,

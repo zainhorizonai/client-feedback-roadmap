@@ -215,7 +215,8 @@ app.get('/api/health/deep', async (c) => {
     onVercel: config.onVercel,
     emailProvider: config.emailProvider,
     resendKeySet: !!config.resendKey,
-    emailFrom: config.emailFrom,
+    emailFrom: config.emailProvider === 'smtp' ? (process.env.EMAIL_FROM ?? `Feedback Portal <${config.smtpUser}>`) : config.emailFrom,
+    smtp: config.emailProvider === 'smtp' ? { host: config.smtpHost, port: config.smtpPort, userSet: !!config.smtpUser, passSet: !!config.smtpPass } : undefined,
     adminEmails: config.adminEmails.length,
     cronSecretSet: true,
     appUrl: config.appUrl,
@@ -506,13 +507,13 @@ app.post('/api/admin/clients/:id/users', async (c) => {
   if (await one('SELECT id FROM users WHERE email = $1', email)) throw new HttpError(409, 'A user with this email already exists')
   const id = crypto.randomUUID()
   await run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES ($1, $2, $3, 'client', $4, $5)", id, email, name, client.id, now())
-  await sendQuietly({
+  const emailSent = await sendQuietly({
     to: email,
     subject: `You have been invited to report issues for ${client.name}`,
     text: `Hi ${name},\n\nYou can now send us bug and UAT reports as short videos.\nSign in with your email (no password needed): ${config.appUrl}`,
     html: layout(`Welcome, ${name}`, `<p>You can now send us bug and UAT reports as short videos for <strong>${escapeHtml(client.name)}</strong>. Sign in with your email, no password needed.</p>`, { label: 'Open the portal', url: config.appUrl }),
   })
-  return c.json({ user: { id, email, name } }, 201)
+  return c.json({ user: { id, email, name }, emailSent }, 201)
 })
 
 // ---------- scheduled housekeeping (Vercel Cron) ----------
