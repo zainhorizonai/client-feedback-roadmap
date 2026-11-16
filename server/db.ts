@@ -101,7 +101,23 @@ const SCHEMA = [
     report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
     PRIMARY KEY (item_id, report_id)
   )`,
+  // A client can belong to several projects. users.client_id stays as their first project for older rows.
+  `CREATE TABLE IF NOT EXISTS memberships (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, client_id)
+  )`,
+  // Who moved a roadmap item, and when: the client's own board is theirs to rearrange, and the team needs to see it.
+  `CREATE TABLE IF NOT EXISTS roadmap_events (
+    id SERIAL PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES roadmap_items(id) ON DELETE CASCADE,
+    at TEXT NOT NULL,
+    by TEXT NOT NULL,
+    text TEXT NOT NULL
+  )`,
   // Added after launch. Idempotent, so existing databases upgrade themselves on the next start.
+  "INSERT INTO memberships (user_id, client_id) SELECT id, client_id FROM users WHERE role = 'client' AND client_id IS NOT NULL ON CONFLICT DO NOTHING",
+  'ALTER TABLE reports ADD COLUMN IF NOT EXISTS roadmap_auto INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE history ADD COLUMN IF NOT EXISTS from_value TEXT',
   'ALTER TABLE history ADD COLUMN IF NOT EXISTS to_value TEXT',
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS submitted_at TEXT',
@@ -110,6 +126,7 @@ const SCHEMA = [
   'UPDATE reports SET submitted_at = created_at WHERE submitted_at IS NULL AND video_path IS NOT NULL',
   'CREATE INDEX IF NOT EXISTS idx_reports_client ON reports(client_id)',
   'CREATE INDEX IF NOT EXISTS idx_history_report ON history(report_id)',
+  'CREATE INDEX IF NOT EXISTS idx_roadmap_events_item ON roadmap_events(item_id)',
   'CREATE INDEX IF NOT EXISTS idx_rate_hits ON rate_hits(key, at)',
 ]
 
@@ -165,6 +182,51 @@ export async function migrateLegacyRoadmap(d: Pick<Driver, 'query' | 'batch'>) {
   }
 }
 
+type Q = Pick<Driver, 'query' | 'batch'>
+export const ROADMAP_KINDS = ['Feature request', 'Question']
+
+/**
+ * Features and questions go straight onto the client's roadmap as "Under review", linked to the report so the
+ * conversation stays one click away. Done once per report (roadmap_auto), so deleting the item later sticks.
+ */
+export async function createRoadmapItemForReport(d: Q, r: { id: string; client_id: string; title: string; description: string; created_at: string }) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const next = (await d.query('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM roadmap_items', []))[0]?.n as number
+    const itemId = `RM-${String(next).padStart(4, '0')}`
+    try {
+      await d.batch([
+        [
+          `INSERT INTO roadmap_items (id, seq, client_id, title, description, state, published, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'Under review', 1, $6, $6)`,
+          [itemId, next, r.client_id, r.title, r.description, r.created_at],
+        ],
+        ['INSERT INTO roadmap_links (item_id, report_id) VALUES ($1, $2)', [itemId, r.id]],
+        ['INSERT INTO roadmap_events (item_id, at, by, text) VALUES ($1, $2, $3, $4)', [itemId, r.created_at, 'client', 'Added from the request']],
+        ['UPDATE reports SET roadmap_auto = 1 WHERE id = $1', [r.id]],
+      ])
+      return itemId
+    } catch (e) {
+      if (attempt === 3 || !isUniqueViolation(e)) throw e // another request took that number: try the next one
+    }
+  }
+  return null
+}
+
+/** Existing feature requests and questions that never reached a roadmap. Runs once for each. */
+export async function backfillRoadmapForRequests(d: Q) {
+  const rows = await d.query(
+    `SELECT id, client_id, title, description, created_at FROM reports r
+      WHERE kind = ANY($1::text[]) AND submitted_at IS NOT NULL AND roadmap_auto = 0
+        AND NOT EXISTS (SELECT 1 FROM roadmap_links l WHERE l.report_id = r.id) ORDER BY seq`,
+    [`{${ROADMAP_KINDS.map((k) => `"${k}"`).join(',')}}`],
+  )
+  for (const r of rows) {
+    await createRoadmapItemForReport(d, { id: String(r.id), client_id: String(r.client_id), title: String(r.title), description: String(r.description), created_at: String(r.created_at) })
+  }
+  // Anything already linked by hand counts as handled.
+  await d.query(`UPDATE reports SET roadmap_auto = 1 WHERE kind = ANY($1::text[]) AND roadmap_auto = 0 AND submitted_at IS NOT NULL`, [`{${ROADMAP_KINDS.map((k) => `"${k}"`).join(',')}}`])
+}
+
 async function init(): Promise<Driver> {
   const d = await createDriver()
   try {
@@ -175,6 +237,7 @@ async function init(): Promise<Driver> {
   }
   try {
     await migrateLegacyRoadmap(d)
+    await backfillRoadmapForRequests(d)
   } catch (e) {
     // Never block the app. Anything left over is retried on the next start.
     console.error('[db] roadmap migration will retry:', e instanceof Error ? e.message : e)

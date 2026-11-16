@@ -7,6 +7,8 @@ interface State { items: RoadmapItem[]; loaded: boolean }
 let state: State = { items: [], loaded: false }
 const listeners = new Set<() => void>()
 const set = (next: State) => { state = next; listeners.forEach((l) => l()) }
+const getState = () => state
+const state_snapshot = () => state.items
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
 
 export const useRoadmap = () => useSyncExternalStore(subscribe, () => state).items
@@ -80,6 +82,21 @@ export async function deleteItem(id: string): Promise<boolean> {
     notify('Roadmap item deleted. Its reports are unchanged.')
     return true
   } catch (e) {
+    notify(message(e), 'error')
+    return false
+  }
+}
+
+/** A client moving a card on their own roadmap. Shown at once, put back if the server refuses it. */
+export async function moveItem(id: string, state: RoadmapState): Promise<boolean> {
+  const before = state_snapshot()
+  set({ ...getState(), items: getState().items.map((i) => (i.id === id ? { ...i, state } : i)) })
+  try {
+    upsert((await api.patch<{ item: RoadmapItem }>(`/api/roadmap/${id}`, { state })).item)
+    notify(`Moved to ${state}. The team has been told.`)
+    return true
+  } catch (e) {
+    set({ ...getState(), items: before })
     notify(message(e), 'error')
     return false
   }

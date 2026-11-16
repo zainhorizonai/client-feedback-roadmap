@@ -76,6 +76,9 @@ export function RoadmapBoard({ items, states, mode, onOpen, onMove, showProject 
                       </span>
                     )}
                   </div>
+                  {mode === 'admin' && item.lastMove?.by === 'client' && (
+                    <p className="mt-2 rounded-control bg-[var(--seam-info-bg)] px-2 py-1 text-xs font-semibold text-[var(--seam-info-fg)]">Moved by the client · {new Date(item.lastMove.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</p>
+                  )}
                   {mode === 'admin' && (
                     <label className="mt-2 block text-sm">
                       <span className="sr-only">Move {item.title} to</span>

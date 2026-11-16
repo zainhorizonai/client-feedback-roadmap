@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Circle, Mic, MicOff, RotateCcw, Square, Upload } from 'lucide-react'
+import fixWebmDuration from 'fix-webm-duration'
 import { Button, buttonClass, VideoEvidence } from './ui'
 
 interface Props {
@@ -60,7 +61,10 @@ export function Recorder({ blob, onChange, maxMb }: Props) {
         }
       }
       const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m))
-      const rec = new MediaRecorder(new MediaStream(tracks), mime ? { mimeType: mime } : undefined)
+      // A modest bitrate keeps a long recording small: screen content stays sharp at this rate, and ten minutes
+      // comes to roughly 150 MB instead of several times that.
+      const rec = new MediaRecorder(new MediaStream(tracks), { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 1_800_000, audioBitsPerSecond: 96_000 })
+      const startedAt = Date.now()
       const chunks: BlobPart[] = []
       let bytes = 0
       rec.ondataavailable = (e) => {
@@ -74,8 +78,12 @@ export function Recorder({ blob, onChange, maxMb }: Props) {
       }
       rec.onstop = () => {
         const out = new Blob(chunks, { type: rec.mimeType || 'video/webm' })
-        setSource({ kind: 'recorded', name: 'Screen recording' })
-        onChange(out)
+        const finish = (blob: Blob) => { setSource({ kind: 'recorded', name: 'Screen recording' }); onChange(blob) }
+        // Browsers write WebM without a length, so a long recording shows 0:00 and cannot be scrubbed.
+        // Writing the real duration into the file fixes both. If that fails, the original still works.
+        if (out.type.includes('webm')) {
+          try { fixWebmDuration(out, Date.now() - startedAt, (fixed) => finish(fixed)) } catch { finish(out) }
+        } else finish(out)
         setRecording(false)
         cleanup()
       }
@@ -143,7 +151,7 @@ export function Recorder({ blob, onChange, maxMb }: Props) {
           <span className="h-3 w-3 animate-pulse rounded-full bg-[var(--seam-error-fg)]" aria-hidden="true" />
           Recording <span className="font-mono tabular-nums">{fmt(seconds)}</span>
         </p>
-        <p className="mt-1 text-muted">Show the problem, then stop. It stops by itself at {maxMb} MB.</p>
+        <p className="mt-1 text-muted">Take as long as you need, then stop. There is no time limit, only the {maxMb} MB file size.</p>
         <Button variant="danger" onClick={stop} className="mt-4"><Square className="h-4 w-4 fill-current" aria-hidden="true" />Stop recording</Button>
       </div>
     )

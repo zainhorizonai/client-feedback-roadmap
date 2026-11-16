@@ -26,8 +26,9 @@ export function AdminClients() {
     e.preventDefault()
     setSending(true)
     try {
-      const r = await api.post<{ emailSent?: boolean }>(`/api/admin/clients/${clientId}/users`, { name: uName, email: uEmail })
-      if (r.emailSent === false) notify(`${uEmail} was added, but the invitation email could not be sent. They can still sign in from the sign-in page.`, 'error')
+      const r = await api.post<{ emailSent?: boolean; addedToExisting?: boolean }>(`/api/admin/clients/${clientId}/users`, { name: uName, email: uEmail })
+      if (r.addedToExisting) notify(`${uEmail} already had an account, so they now have access to this project too.`)
+      else if (r.emailSent === false) notify(`${uEmail} was added, but the invitation email could not be sent. They can still sign in from the sign-in page.`, 'error')
       else notify(`Invitation sent to ${uEmail}.`)
       setUName(''); setUEmail(''); setInviting(null)
       await reload()

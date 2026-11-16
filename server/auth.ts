@@ -10,8 +10,11 @@ export interface AuthUser {
   email: string
   name: string
   role: 'admin' | 'client'
+  /** The client's first project. Kept so single-project code keeps working. */
   clientId: string | null
   clientName: string | null
+  /** Every project this person belongs to. Empty for admins, who can see them all. */
+  projects: { id: string; name: string }[]
 }
 
 const COOKIE = 'sid'
@@ -91,13 +94,19 @@ export async function logout(c: Context) {
 }
 
 async function loadUserBySession(sid: string): Promise<AuthUser | null> {
-  const u = await one<{ id: string; email: string; name: string; role: 'admin' | 'client'; client_id: string | null; client_name: string | null }>(
-    `SELECT u.id, u.email, u.name, u.role, u.client_id, c.name AS client_name
-       FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN clients c ON c.id = u.client_id
+  const u = await one<{ id: string; email: string; name: string; role: 'admin' | 'client'; projects: unknown }>(
+    `SELECT u.id, u.email, u.name, u.role,
+            COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name) ORDER BY c.name)
+                        FROM memberships m JOIN clients c ON c.id = m.client_id WHERE m.user_id = u.id), '[]'::json) AS projects
+       FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.id_hash = $1 AND s.expires_at > $2`,
     sha256(sid), iso(),
   )
-  return u ? { id: u.id, email: u.email, name: u.name, role: u.role, clientId: u.client_id, clientName: u.client_name } : null
+  if (!u) return null
+  // Some drivers hand back json already parsed, others as text.
+  const raw = typeof u.projects === 'string' ? JSON.parse(u.projects) : u.projects
+  const projects = (Array.isArray(raw) ? raw : []) as { id: string; name: string }[]
+  return { id: u.id, email: u.email, name: u.name, role: u.role, clientId: projects[0]?.id ?? null, clientName: projects[0]?.name ?? null, projects }
 }
 
 export const withUser: MiddlewareHandler<{ Variables: { user: AuthUser | null } }> = async (c, next) => {

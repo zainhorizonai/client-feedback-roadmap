@@ -20,8 +20,11 @@ export interface User {
   email: string
   name: string
   role: Role
+  /** First project. Admins have none. */
   clientId: string | null
   clientName: string | null
+  /** Every project this person belongs to. A client can be invited into several. */
+  projects: { id: string; name: string }[]
 }
 
 /** A client organisation. In the product it is called a project. */
@@ -73,8 +76,11 @@ export interface RoadmapItem {
   targetWindow: string
   clientUpdate: string
   updatedAt: string
-  /** Client: number of their own linked reports. */
+  /** Who moved the card last, and when. Clients can move cards on their own roadmap. */
+  lastMove?: { by: 'client' | 'admin'; at: string; text: string }
+  /** Client: number of their own linked reports, and their ids so a card can lead to the conversation. */
   linkedCount?: number
+  reportIds?: string[]
   /** Admin only. */
   clientName?: string
   published?: boolean

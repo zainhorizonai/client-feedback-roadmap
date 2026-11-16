@@ -1,7 +1,7 @@
 import { cloneElement, forwardRef, useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from 'react'
 import { Link, type LinkProps } from 'react-router-dom'
 import { Loader2, VideoOff, X } from 'lucide-react'
-import type { Kind, Severity, Status } from '../lib/types'
+import type { Kind, RoadmapState, Severity, Status } from '../lib/types'
 
 // ---------- Button ----------
 
@@ -49,6 +49,8 @@ const SEVERITY_TONE: Record<Severity, string> = { Low: 'badge-neutral', Medium: 
 
 export const StatusBadge = ({ status }: { status: Status }) => <span className={`badge ${STATUS_TONE[status]}`}>{status}</span>
 export const SeverityBadge = ({ severity }: { severity: Severity }) => <span className={`badge ${SEVERITY_TONE[severity]}`}>{severity}</span>
+const STAGE_TONE: Record<RoadmapState, string> = { 'Under review': 'badge-neutral', Planned: 'badge-info', 'In progress': 'badge-warning', Done: 'badge-success' }
+export const StageBadge = ({ stage }: { stage: RoadmapState }) => <span className={`badge ${STAGE_TONE[stage]}`}>{stage}</span>
 export const KindTag = ({ kind }: { kind: Kind }) => (
   <span className="inline-block rounded-control border border-line bg-surface px-2 py-0.5 text-[.8125rem] leading-5 text-muted">{kind}</span>
 )

@@ -19,6 +19,7 @@ async function user(email: string, name: string, clientId: string) {
   if (ex) return ex.id
   const id = crypto.randomUUID()
   await run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES ($1, $2, $3, 'client', $4, $5)", id, email, name, clientId, ago(30))
+  await run('INSERT INTO memberships (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', id, clientId)
   return id
 }
 

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Bug, CheckCircle2, ClipboardCheck, HelpCircle, Lightbulb, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../lib/auth'
+import { useClientProject } from '../lib/clientProject'
 import { ApiError } from '../lib/api'
 import { createReport } from '../lib/store'
 import { hasSeverity, SEVERITIES, type Kind, type Severity } from '../lib/types'
@@ -25,6 +26,8 @@ const COPY: Record<Kind, { title: string; placeholder: string; detail: string; v
 export function NewReport() {
   const nav = useNavigate()
   const { maxVideoMb } = useAuth()
+  const { projects, selectedId } = useClientProject()
+  const [projectId, setProjectId] = useState(selectedId)
   const [params] = useSearchParams()
   const [kind, setKind] = useState<Kind>(OPTIONS.find((o) => o.param === params.get('type'))?.kind ?? 'Bug')
   const [video, setVideo] = useState<Blob | null>(null)
@@ -39,6 +42,8 @@ export function NewReport() {
   const [error, setError] = useState('')
   const titleRef = useRef<HTMLInputElement>(null)
   const copy = COPY[kind]
+  // Ideas and questions go on the client's roadmap. Bugs and UAT findings go to the fix list.
+  const onRoadmap = kind === 'Feature request' || kind === 'Question'
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -52,7 +57,7 @@ export function NewReport() {
     setProgress(0)
     setError('')
     try {
-      const r = await createReport({ title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) ? severity : 'Medium', kind }, video, setProgress)
+      const r = await createReport({ clientId: projectId, title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) ? severity : 'Medium', kind }, video, setProgress)
       setDoneId(r.id)
     } catch (err) {
       // Everything they typed, and the video, stay in place so Retry is one click.
@@ -69,11 +74,12 @@ export function NewReport() {
           <SeamDivider />
           <div className="p-6" role="status">
             <CheckCircle2 className="mx-auto h-10 w-10 text-[var(--seam-success-fg)]" aria-hidden="true" />
-            <h1 className="mt-3 font-semibold">Report received</h1>
-            <p className="mt-2 text-muted">Your reference is <Mono className="font-semibold text-ink">{doneId}</Mono>. We will update you here and by email.</p>
+            <h1 className="mt-3 font-semibold">{onRoadmap ? 'Added to your roadmap' : 'Report received'}</h1>
+            <p className="mt-2 text-muted">Your reference is <Mono className="font-semibold text-ink">{doneId}</Mono>. {onRoadmap ? 'You can follow it and move it between stages on your roadmap.' : 'We will update you here and by email.'}</p>
             <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
               <Button onClick={() => nav(`/reports/${doneId}`)}>View report</Button>
-              <ButtonLink to="/reports" variant="secondary">Back to my reports</ButtonLink>
+              {onRoadmap && <ButtonLink to="/reports?view=board" variant="secondary">See the roadmap</ButtonLink>}
+              <ButtonLink to="/reports" variant="secondary">Back to my items</ButtonLink>
             </div>
           </div>
         </div>
@@ -92,7 +98,7 @@ export function NewReport() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link to="/reports" className="mb-4 inline-flex min-h-9 items-center gap-1 text-muted"><ArrowLeft className="h-4 w-4" aria-hidden="true" />My reports</Link>
+      <Link to="/reports" className="mb-4 inline-flex min-h-9 items-center gap-1 text-muted"><ArrowLeft className="h-4 w-4" aria-hidden="true" />My items</Link>
       <h1 className="font-semibold">{copy.title}</h1>
 
       <form onSubmit={submit} noValidate className="mt-6 space-y-8">
@@ -109,6 +115,16 @@ export function NewReport() {
             ))}
           </div>
         </fieldset>
+
+        {projects.length > 1 && (
+          <section className="rounded-card border border-line bg-surface p-4">
+            <Field label="Project" hint="Which of your projects is this for?" required>
+              <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </Field>
+          </section>
+        )}
 
         {videoFirst && videoSection}
 

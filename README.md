@@ -27,8 +27,8 @@ Optional: set `MAX_VIDEO_MB` (default 500).
 
 ## What clients and admins can do
 
-- **Clients** send a Bug, UAT finding, Feature request or Question. A video is optional. They follow each report's status, reply in its conversation, confirm a fix or say it is still broken, and see a **Roadmap** of the items published to their project.
-- **Admins** triage new reports in the **Inbox**, work everything in the **Tracker**, reply to clients and keep private internal notes in the report drawer, and build the **Roadmap**: create items, link the reports they cover, and publish them. Publishing is always explicit. An item moving to Done does not resolve its reports.
+- **Clients** use one page, **My items**. They send a Bug, UAT finding, Feature request or Question (video optional, no time limit on a recording). Bugs and UAT findings go to the fix list; features and questions land on their roadmap. They switch between a list and the roadmap stages, filter by type and status, see how many items are pending, approve anything as done, confirm or reject a fix, and drag their roadmap cards between stages. A client can be invited into several projects and switches between them.
+- **Admins** triage new reports in the **Inbox**, work everything in the **Tracker**, reply to clients and keep private internal notes in the report drawer, and build the **Roadmap**: create items, link the reports they cover, and publish them. Publishing is always explicit. An item moving to Done does not resolve its reports. Admins see when a client moved a card.
 
 ## How uploads work on Vercel
 

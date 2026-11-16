@@ -531,7 +531,7 @@ describe('optional video, item types and the roadmap', () => {
     assert.equal(list.some((x) => x.id === created.data.report.id), false)
   })
 
-  it('gives each type its own id prefix and never puts a report on the roadmap by itself', async () => {
+  it('gives each type its own id prefix, and sends features and questions (only) to the roadmap', async () => {
     const feat = await jane.json('POST', '/api/reports', { title: 'Dark mode', kind: 'Feature request', withVideo: false })
     assert.equal(feat.data.report.kind, 'Feature request')
     assert.match(feat.data.report.id, /^REQ-\d{4}$/)
@@ -542,7 +542,12 @@ describe('optional video, item types and the roadmap', () => {
     const nums = [feat, q, uat].map((x) => Number(x.data.report.id.split('-')[1]))
     assert.equal(new Set(nums).size, 3, 'numbers are unique across types')
     assert.equal((await jane.json('POST', '/api/reports', { title: 'x', kind: 'Rant', withVideo: false })).status, 400)
-    assert.equal(((await jane.json('GET', '/api/roadmap')).data.items as Json[]).length, 0, 'nothing is published automatically')
+    const onBoard = ((await jane.json('GET', '/api/roadmap')).data.items as Json[])
+    const has = (id: string) => onBoard.some((i) => (i.reportIds as string[]).includes(id))
+    assert.ok(has(feat.data.report.id), 'a feature request is on the roadmap')
+    assert.ok(has(q.data.report.id), 'a question is on the roadmap')
+    assert.equal(has(uat.data.report.id), false, 'UAT findings stay in the fix list')
+    assert.equal(onBoard.find((i) => (i.reportIds as string[]).includes(feat.data.report.id))?.state, 'Under review')
   })
 
   it('walks Needs client input, emailing the client, and skips email for Triaging', async () => {
@@ -667,5 +672,175 @@ describe('upgrade from the earlier roadmap model', () => {
     const before = (await all('SELECT id FROM roadmap_items')).length
     await migrateLegacyRoadmap(driver)
     assert.equal((await all('SELECT id FROM roadmap_items')).length, before, 'running again changes nothing')
+  })
+})
+
+describe('several projects, approvals and client moves', () => {
+  const admin = new Client()
+  const jane = new Client()
+  const sam = new Client()
+  let acme = ''
+  let globex = ''
+  let third = ''
+
+  before(async () => {
+    await run('DELETE FROM rate_hits')
+    await admin.signIn('admin@test.com')
+    const clients = (await admin.json('GET', '/api/admin/clients')).data.clients as Json[]
+    acme = clients.find((c) => c.name === 'Acme')!.id
+    globex = clients.find((c) => c.name === 'Globex')!.id
+    third = (await admin.json('POST', '/api/admin/clients', { name: 'Third' })).data.client.id
+    await jane.signIn('jane@acme.com')
+    await sam.signIn('sam@globex.com')
+  })
+
+  it('adds an existing client to a second project and keeps one sign-in', async () => {
+    assert.equal(((await jane.json('GET', '/api/me')).data.user.projects as Json[]).length, 1)
+    const r = await admin.json('POST', `/api/admin/clients/${globex}/users`, { email: 'jane@acme.com', name: 'ignored' })
+    assert.equal(r.status, 201)
+    assert.equal(r.data.addedToExisting, true)
+    assert.equal(r.data.user.name, 'Jane', 'keeps her own name')
+    const me = (await jane.json('GET', '/api/me')).data.user
+    assert.deepEqual((me.projects as Json[]).map((p) => p.name).sort(), ['Acme', 'Globex'])
+    assert.equal((await admin.json('POST', `/api/admin/clients/${globex}/users`, { email: 'jane@acme.com', name: 'x' })).status, 409, 'cannot add twice')
+    assert.equal((await admin.json('POST', `/api/admin/clients/${acme}/users`, { email: 'admin@test.com', name: 'x' })).status, 409, 'cannot add a team member')
+    const listed = ((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === globex)!
+    assert.ok((listed.users as Json[]).some((u) => u.email === 'jane@acme.com'))
+  })
+
+  it('makes her choose a project when she has several, and only one of hers', async () => {
+    assert.equal((await jane.json('POST', '/api/reports', { title: 'Which one?', withVideo: false })).status, 400)
+    assert.equal((await jane.json('POST', '/api/reports', { title: 'Not mine', clientId: third, withVideo: false })).status, 400)
+    const ok = await jane.json('POST', '/api/reports', { title: 'For Globex', clientId: globex, withVideo: false })
+    assert.equal(ok.status, 201)
+    assert.equal(ok.data.report.clientId, globex)
+    const inAcme = await jane.json('POST', '/api/reports', { title: 'For Acme', clientId: acme, withVideo: false })
+    assert.equal(inAcme.data.report.clientId, acme)
+  })
+
+  it('shows her both projects and keeps every other client out', async () => {
+    const mine = ((await jane.json('GET', '/api/reports')).data.reports as Json[])
+    assert.ok(mine.some((r) => r.clientId === acme) && mine.some((r) => r.clientId === globex))
+    const globexReport = mine.find((r) => r.clientId === globex)!.id
+    assert.equal((await jane.json('GET', `/api/reports/${globexReport}`)).status, 200)
+    // sam is only in Globex: he sees Globex, never Acme
+    const sams = ((await sam.json('GET', '/api/reports')).data.reports as Json[])
+    assert.ok(sams.every((r) => r.clientId === globex))
+    const acmeReport = mine.find((r) => r.clientId === acme)!.id
+    assert.equal((await sam.json('GET', `/api/reports/${acmeReport}`)).status, 404)
+    // and nobody sees a project they are not in
+    const third1 = ((await admin.json('POST', '/api/admin/roadmap', { clientId: third, title: 'Secret', published: true })).data.item)
+    assert.equal(((await jane.json('GET', '/api/roadmap')).data.items as Json[]).some((i) => i.id === third1.id), false)
+    assert.equal((await jane.json('PATCH', `/api/roadmap/${third1.id}`, { state: 'Done' })).status, 404)
+  })
+
+  it('lets a client move cards on their own roadmap, records it, and tells the team', async () => {
+    const mails: Json[] = []
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    config.emailProvider = 'smtp'; config.smtpUser = 'sender@gmail.com'
+    setMailTransportForTests({ sendMail: async (m) => { mails.push(m); return {} } })
+    try {
+      const rep = (await jane.json('POST', '/api/reports', { title: 'Offline mode', kind: 'Feature request', clientId: acme, withVideo: false })).data.report
+      const item = ((await jane.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => (i.reportIds as string[]).includes(rep.id))!
+      mails.length = 0
+      const moved = await jane.json('PATCH', `/api/roadmap/${item.id}`, { state: 'Planned' })
+      assert.equal(moved.status, 200)
+      assert.equal(moved.data.item.state, 'Planned')
+      assert.equal(moved.data.item.lastMove.by, 'client')
+      assert.match(moved.data.item.lastMove.text, /Under review to Planned/)
+      assert.ok(mails.some((m) => /moved "Offline mode" to Planned/.test(m.subject) && m.to.includes('admin@test.com')), 'admin emailed')
+      mails.length = 0
+      await jane.json('PATCH', `/api/roadmap/${item.id}`, { state: 'Planned' })
+      assert.equal(mails.length, 0, 'moving to the same stage changes nothing')
+
+      assert.equal((await jane.json('PATCH', `/api/roadmap/${item.id}`, { state: 'Someday' })).status, 400)
+      assert.equal((await sam.json('PATCH', `/api/roadmap/${item.id}`, { state: 'Done' })).status, 404, 'another project cannot')
+      assert.equal((await admin.json('PATCH', `/api/roadmap/${item.id}`, { state: 'Done' })).status, 403, 'admins use their own route')
+      const seen = ((await admin.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => i.id === item.id)!
+      assert.equal(seen.lastMove.by, 'client')
+
+      // and when the team moves it, that is recorded as the team
+      const byAdmin = await admin.json('PATCH', `/api/admin/roadmap/${item.id}`, { state: 'In progress' })
+      assert.equal(byAdmin.data.item.lastMove.by, 'admin')
+    } finally {
+      setMailTransportForTests(null); config.emailProvider = 'console'; config.smtpUser = ''
+    }
+  })
+
+  it('lets a client approve any item as done', async () => {
+    const bug = (await jane.json('POST', '/api/reports', { title: 'Approve me', clientId: acme, withVideo: false })).data.report.id
+    // not waiting for verification: closed by the client
+    const closed = await jane.json('POST', `/api/reports/${bug}/approve`, { note: 'No longer needed' })
+    assert.equal(closed.status, 200)
+    assert.equal(closed.data.report.status, 'Resolved')
+    assert.ok(closed.data.report.resolvedAt)
+    assert.ok(closed.data.report.history.some((h: Json) => h.kind === 'outcome' && h.text === 'Closed by client: No longer needed'))
+    assert.ok(closed.data.report.history.some((h: Json) => h.kind === 'status' && h.to === 'Resolved'))
+    assert.equal((await jane.json('POST', `/api/reports/${bug}/approve`, {})).status, 409, 'already done')
+
+    // waiting for verification: verified by the client
+    const fix = (await jane.json('POST', '/api/reports', { title: 'Verify me', clientId: acme, withVideo: false })).data.report.id
+    await admin.json('PATCH', `/api/reports/${fix}`, { status: 'Ready to verify' })
+    const verified = await jane.json('POST', `/api/reports/${fix}/approve`, {})
+    assert.ok(verified.data.report.history.some((h: Json) => h.text === 'Verified by client'))
+
+    assert.equal((await sam.json('POST', `/api/reports/${fix}/approve`, {})).status, 404, 'another project cannot approve it')
+    assert.equal((await admin.json('POST', `/api/reports/${fix}/approve`, {})).status, 403, 'only clients approve')
+  })
+
+  it('finishes a feature request\'s roadmap card when its client approves it, but not a shared card', async () => {
+    const solo = (await jane.json('POST', '/api/reports', { title: 'Solo feature', kind: 'Feature request', clientId: acme, withVideo: false })).data.report
+    const soloItem = ((await jane.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => (i.reportIds as string[]).includes(solo.id))!
+    await jane.json('POST', `/api/reports/${solo.id}/approve`, {})
+    const after = ((await jane.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => i.id === soloItem.id)!
+    assert.equal(after.state, 'Done')
+    assert.match(after.lastMove.text, /approved by the client/)
+
+    const a = (await jane.json('POST', '/api/reports', { title: 'Shared A', kind: 'Feature request', clientId: acme, withVideo: false })).data.report.id
+    const b = (await jane.json('POST', '/api/reports', { title: 'Shared B', kind: 'Feature request', clientId: acme, withVideo: false })).data.report.id
+    const shared = (await admin.json('POST', '/api/admin/roadmap', { clientId: acme, title: 'Shared work', state: 'In progress', published: true, reportIds: [a, b] })).data.item
+    await jane.json('POST', `/api/reports/${a}/approve`, {})
+    const kept = ((await jane.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => i.id === shared.id)!
+    assert.equal(kept.state, 'In progress', 'a card covering several requests stays put')
+  })
+
+  it('puts a feature request on the roadmap only once its video has uploaded', async () => {
+    const created = await jane.json('POST', '/api/reports', { title: 'Feature with video', kind: 'Feature request', clientId: acme })
+    const id = created.data.report.id
+    const before = ((await jane.json('GET', '/api/roadmap')).data.items as Json[]).some((i) => (i.reportIds as string[]).includes(id))
+    assert.equal(before, false, 'not before the upload finishes')
+    assert.equal((await upload(jane, id)).status, 200)
+    assert.equal(((await jane.json('GET', '/api/roadmap')).data.items as Json[]).some((i) => (i.reportIds as string[]).includes(id)), true)
+  })
+})
+
+describe('older requests reach the roadmap once', () => {
+  it('backfills existing feature requests and does not bring back a deleted card', async () => {
+    const { backfillRoadmapForRequests, all, one, run, batch } = await import('../db.js')
+    const driver = {
+      query: async (t: string, p: (string | number | null)[]) => (await all(t, ...p)) as Record<string, unknown>[],
+      batch: async (b: [string, (string | null)[]][]) => batch(b),
+    }
+    const client = (await one<{ id: string }>("SELECT id FROM clients WHERE name = 'Acme'"))!.id
+    const jane = (await one<{ id: string }>("SELECT id FROM users WHERE email = 'jane@acme.com'"))!.id
+    await run(
+      `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, kind, submitted_at)
+       VALUES ('REQ-9100', 9100, '2026-02-01T00:00:00.000Z', $1, $2, 'Old request', 'from before', 'Feature request', '2026-02-01T00:00:00.000Z')`,
+      client, jane,
+    )
+    await backfillRoadmapForRequests(driver)
+    const item = await one<{ id: string; state: string; published: number }>("SELECT i.* FROM roadmap_items i JOIN roadmap_links l ON l.item_id = i.id WHERE l.report_id = 'REQ-9100'")
+    assert.equal(item?.state, 'Under review')
+    assert.equal(item?.published, 1)
+    assert.equal((await one<{ roadmap_auto: number }>("SELECT roadmap_auto FROM reports WHERE id = 'REQ-9100'"))?.roadmap_auto, 1)
+
+    const count = (await all("SELECT id FROM roadmap_items")).length
+    await backfillRoadmapForRequests(driver)
+    assert.equal((await all("SELECT id FROM roadmap_items")).length, count, 'running again adds nothing')
+
+    await run('DELETE FROM roadmap_items WHERE id = $1', item!.id)
+    await backfillRoadmapForRequests(driver)
+    assert.equal((await all("SELECT l.item_id FROM roadmap_links l WHERE l.report_id = 'REQ-9100'")).length, 0, 'a deleted card stays deleted')
   })
 })

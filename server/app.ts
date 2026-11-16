@@ -3,7 +3,7 @@ import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { config } from './config.js'
-import { all, batch, isUniqueViolation, one, run } from './db.js'
+import { all, batch, createRoadmapItemForReport, isUniqueViolation, one, ROADMAP_KINDS, run } from './db.js'
 import { clientIp, logout, rateLimited, requestLogin, verifyLogin, withUser, type AuthUser } from './auth.js'
 import { escapeHtml, layout, sendEmail, sendQuietly } from './email.js'
 import { blobPrefix, extFor, getStorage, isAllowedMime, normalizeMime, TooLargeError } from './storage.js'
@@ -72,9 +72,13 @@ function requireAdmin(c: Context<Env>): AuthUser {
 }
 function requireClient(c: Context<Env>): AuthUser {
   const u = requireUser(c)
-  if (u.role !== 'client' || !u.clientId) throw new HttpError(403, 'Clients only')
+  if (u.role !== 'client' || u.projects.length === 0) throw new HttpError(403, 'Clients only')
   return u
 }
+
+/** A client can use a project if they belong to it. Admins can use all of them. */
+const inProject = (user: AuthUser, clientId: string) => user.role === 'admin' || user.projects.some((p) => p.id === clientId)
+const projectArray = (user: AuthUser) => `{${user.projects.map((p) => `"${p.id}"`).join(',')}}`
 
 const maxMb = () => Math.round(config.maxVideoBytes / 1024 / 1024)
 
@@ -85,7 +89,7 @@ interface ReportRow {
   reporter_id: string; reporter_name: string; reporter_email: string
   title: string; description: string; page_url: string; severity: string; status: Status
   notes: string; resolution_url: string; video_path: string | null; video_mime: string | null; resolved_at: string | null
-  kind: Kind; roadmap_stage: string | null; submitted_at: string | null; reporter_role: 'admin' | 'client'
+  kind: Kind; roadmap_stage: string | null; roadmap_auto: number; submitted_at: string | null; reporter_role: 'admin' | 'client'
 }
 interface HistoryRow { report_id: string; at: string; by: string; kind: string; text: string; from_value: string | null; to_value: string | null }
 interface LinkedItem { id: string; title: string; state: string }
@@ -132,7 +136,7 @@ async function historyFor(ids: string[]): Promise<Map<string, HistoryRow[]>> {
 async function loadReport(user: AuthUser, id: string): Promise<ReportRow> {
   const r = await one<ReportRow>(`${REPORT_SELECT} WHERE r.id = $1`, id)
   if (!r) throw new HttpError(404, 'Report not found')
-  if (user.role === 'client' && r.client_id !== user.clientId) throw new HttpError(404, 'Report not found')
+  if (!inProject(user, r.client_id)) throw new HttpError(404, 'Report not found')
   return r
 }
 
@@ -166,18 +170,18 @@ async function adminEmails(): Promise<string[]> {
 const adminLink = (id: string) => `${config.appUrl}/admin/tracker?report=${id}`
 const clientLink = (id: string) => `${config.appUrl}/reports/${id}`
 
-async function mailAdmins(subject: string, lines: string[], id: string) {
+async function mailAdmins(subject: string, lines: string[], id: string, url = adminLink(id), label = 'Open report') {
   await sendQuietly({
     to: await adminEmails(),
     subject,
-    text: `${lines.join('\n')}\n\n${adminLink(id)}`,
-    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'Open report', url: adminLink(id) }),
+    text: `${lines.join('\n')}\n\n${url}`,
+    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label, url }),
   })
 }
 /** Whoever sent the item gets the email. Items added by the team go to everyone at that client. */
 async function clientRecipients(r: ReportRow): Promise<string[]> {
   if (r.reporter_role === 'client') return [r.reporter_email]
-  return (await all<{ email: string }>("SELECT email FROM users WHERE role = 'client' AND client_id = $1", r.client_id)).map((u) => u.email)
+  return (await all<{ email: string }>("SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.client_id = $1 AND u.role = 'client'", r.client_id)).map((u) => u.email)
 }
 const mailClient = async (r: ReportRow, subject: string, lines: string[]) =>
   sendQuietly({
@@ -319,7 +323,7 @@ app.get('/api/reports', async (c) => {
   // Reports still waiting for their video to finish uploading are drafts and stay hidden.
   const rows = user.role === 'admin'
     ? await all<ReportRow>(`${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL ORDER BY r.seq DESC`)
-    : await all<ReportRow>(`${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL AND r.client_id = $1 ORDER BY r.seq DESC`, user.clientId)
+    : await all<ReportRow>(`${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL AND r.client_id = ANY($1::text[]) ORDER BY r.seq DESC`, projectArray(user))
   const ids = rows.map((r) => r.id)
   const hist = await historyFor(ids)
   const linked = user.role === 'admin' ? await itemsFor(ids) : new Map<string, LinkedItem[]>()
@@ -354,7 +358,17 @@ async function insertReport(f: {
   throw new HttpError(409, 'Could not create the item, please try again')
 }
 
+/** Features and questions land on the client's roadmap as soon as they are submitted. */
+async function addToRoadmapIfRequest(r: ReportRow) {
+  if (!ROADMAP_KINDS.includes(r.kind) || r.roadmap_auto === 1) return
+  await createRoadmapItemForReport(
+    { query: async (t, p) => (await all(t, ...p)) as Record<string, unknown>[], batch },
+    { id: r.id, client_id: r.client_id, title: r.title, description: r.description, created_at: r.created_at },
+  )
+}
+
 async function announceSubmission(r: ReportRow) {
+  await addToRoadmapIfRequest(r)
   const issue = r.kind === 'Bug' || r.kind === 'UAT finding'
   await mailAdmins(`New report from ${r.client_name} · ${r.id}`, [`${r.reporter_name} (${r.client_name}) sent a ${r.kind.toLowerCase()}: ${r.title}`, ...(issue ? [`Severity: ${r.severity}`] : []), r.description], r.id)
   await mailClient(r, `We received your report · ${r.id}`, [`Thanks. We received "${r.title}". We will update you here and by email.`])
@@ -373,8 +387,12 @@ app.post('/api/reports', async (c) => {
   const withVideo = body.withVideo !== false
   const storage = getStorage()
 
+  // People who belong to several projects say which one this is for. With one project there is nothing to choose.
+  const clientId = typeof body.clientId === 'string' && body.clientId ? body.clientId : user.projects.length === 1 ? user.projects[0].id : ''
+  if (!user.projects.some((p) => p.id === clientId)) throw new HttpError(400, 'Choose which of your projects this is for')
+
   const id = await insertReport({
-    clientId: user.clientId!, reporterId: user.id, title, description, pageUrl, severity, kind,
+    clientId, reporterId: user.id, title, description, pageUrl, severity, kind,
     submittedAt: withVideo ? null : now(),
   })
   if (!withVideo) {
@@ -567,6 +585,33 @@ app.post('/api/reports/:id/confirm', async (c) => {
   return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
 })
 
+// A client can approve any of their items as done, not only a fix waiting to be verified.
+app.post('/api/reports/:id/approve', async (c) => {
+  const user = requireClient(c)
+  const r = await loadReport(user, c.req.param('id'))
+  if (r.status === 'Resolved') throw new HttpError(409, 'This is already done')
+  const note = text((await json(c)).note, 'note', 2000)
+  const verified = r.status === 'Ready to verify'
+  const outcome = verified ? 'Verified by client' : 'Closed by client'
+  // A roadmap item that stands for just this one request is finished too.
+  const items = await all<{ id: string; state: string }>(
+    `SELECT i.id, i.state FROM roadmap_items i WHERE i.state <> 'Done' AND i.id IN (
+       SELECT l.item_id FROM roadmap_links l GROUP BY l.item_id HAVING COUNT(*) = 1 AND MIN(l.report_id) = $1)`,
+    r.id,
+  )
+  await batch([
+    historyStmt(r.id, 'client', 'status', `Status changed from ${r.status} to Resolved`, r.status, 'Resolved'),
+    historyStmt(r.id, 'client', 'outcome', note ? `${outcome}: ${note}` : outcome),
+    ["UPDATE reports SET status = 'Resolved', resolved_at = $1 WHERE id = $2", [now(), r.id]],
+    ...items.flatMap((i): Stmt[] => [
+      ["UPDATE roadmap_items SET state = 'Done', updated_at = $1 WHERE id = $2", [now(), i.id]],
+      ['INSERT INTO roadmap_events (item_id, at, by, text) VALUES ($1, $2, $3, $4)', [i.id, now(), 'client', `Moved from ${i.state} to Done (approved by the client)`]],
+    ]),
+  ])
+  await mailAdmins(`${r.id} · ${outcome}`, [`${r.client_name} approved "${r.title}" as done.`, ...(note ? [note] : [])], r.id)
+  return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
+})
+
 // ---------- roadmap items ----------
 // Separate from reports. A client only sees items published to their project, with a public description and
 // update. Linked reports are never exposed: a client gets at most a count of their own linked reports.
@@ -589,18 +634,31 @@ async function linkedReports(ids: string[]) {
   return map
 }
 
-function serializeItem(i: ItemRow, user: AuthUser, links: { id: string; title: string; status: string; kind: string; submitted: boolean }[]) {
-  const base = { id: i.id, clientId: i.client_id, title: i.title, description: i.description, state: i.state, targetWindow: i.target_window, clientUpdate: i.client_update, updatedAt: i.updated_at }
+async function lastMoves(ids: string[]) {
+  const map = new Map<string, { by: string; at: string; text: string }>()
+  if (ids.length === 0) return map
+  const rows = await all<{ item_id: string; at: string; by: string; text: string }>(
+    'SELECT DISTINCT ON (item_id) item_id, at, by, text FROM roadmap_events WHERE item_id = ANY($1::text[]) ORDER BY item_id, id DESC',
+    `{${ids.map((i) => `"${i}"`).join(',')}}`,
+  )
+  for (const r of rows) map.set(r.item_id, { by: r.by, at: r.at, text: r.text })
+  return map
+}
+
+function serializeItem(i: ItemRow, user: AuthUser, links: { id: string; title: string; status: string; kind: string; submitted: boolean }[], moves: Map<string, { by: string; at: string; text: string }> = new Map()) {
+  const base = { id: i.id, clientId: i.client_id, title: i.title, description: i.description, state: i.state, targetWindow: i.target_window, clientUpdate: i.client_update, updatedAt: i.updated_at, lastMove: moves.get(i.id) }
   if (user.role === 'admin') {
     return { ...base, clientName: i.client_name, published: i.published === 1, createdAt: i.created_at, reports: links.map(({ id, title, status, kind }) => ({ id, title, status, kind })) }
   }
   // For clients: only a count, and only of reports in their own project that they can already open.
-  return { ...base, linkedCount: links.filter((l) => l.submitted).length }
+  // Reports in their own project, which they can already open. Lets a card lead to the conversation.
+  const open = links.filter((l) => l.submitted)
+  return { ...base, linkedCount: open.length, reportIds: open.slice(0, 20).map((l) => l.id) }
 }
 
 async function loadItem(user: AuthUser, id: string): Promise<ItemRow> {
   const i = await one<ItemRow>(`${ITEM_SELECT} WHERE i.id = $1`, id)
-  if (!i || (user.role === 'client' && (i.client_id !== user.clientId || i.published !== 1))) throw new HttpError(404, 'Roadmap item not found')
+  if (!i || (user.role === 'client' && (!inProject(user, i.client_id) || i.published !== 1))) throw new HttpError(404, 'Roadmap item not found')
   return i
 }
 
@@ -611,9 +669,11 @@ app.get('/api/roadmap', async (c) => {
     ? filter
       ? await all<ItemRow>(`${ITEM_SELECT} WHERE i.client_id = $1 ORDER BY i.seq DESC`, filter)
       : await all<ItemRow>(`${ITEM_SELECT} ORDER BY i.seq DESC`)
-    : await all<ItemRow>(`${ITEM_SELECT} WHERE i.client_id = $1 AND i.published = 1 ORDER BY i.seq DESC`, user.clientId)
-  const links = await linkedReports(rows.map((i) => i.id))
-  return c.json({ items: rows.map((i) => serializeItem(i, user, links.get(i.id) ?? [])) })
+    : await all<ItemRow>(`${ITEM_SELECT} WHERE i.client_id = ANY($1::text[]) AND i.published = 1 ORDER BY i.seq DESC`, projectArray(user))
+  const ids = rows.map((i) => i.id)
+  const links = await linkedReports(ids)
+  const moves = await lastMoves(ids)
+  return c.json({ items: rows.map((i) => serializeItem(i, user, links.get(i.id) ?? [], moves)) })
 })
 
 /** Replaces an item's links. Every report must belong to the item's own project. */
@@ -660,7 +720,7 @@ app.post('/api/admin/roadmap', async (c) => {
   if (links.length > 1) await batch(links.slice(1).map(([q, p]): Stmt => [q, [itemId, ...p.slice(1)]]))
   const admin = c.get('user')!
   const item = await loadItem(admin, itemId)
-  return c.json({ item: serializeItem(item, admin, (await linkedReports([itemId])).get(itemId) ?? []) }, 201)
+  return c.json({ item: serializeItem(item, admin, (await linkedReports([itemId])).get(itemId) ?? [], await lastMoves([itemId])) }, 201)
 })
 
 app.patch('/api/admin/roadmap/:id', async (c) => {
@@ -672,7 +732,12 @@ app.patch('/api/admin/roadmap/:id', async (c) => {
   const set = (col: string, v: string | number) => { vals.push(v); sets.push(`${col} = $${vals.length}`) }
   if ('title' in body) set('title', text(body.title, 'title', 120, true))
   if ('description' in body) set('description', text(body.description, 'description', 2000))
-  if ('state' in body) set('state', oneOf(body.state, ROADMAP_STATES, 'state'))
+  let movedTo: string | null = null
+  if ('state' in body) {
+    const next = oneOf(body.state, ROADMAP_STATES, 'state')
+    if (next !== item.state) movedTo = next
+    set('state', next)
+  }
   if ('targetWindow' in body) set('target_window', text(body.targetWindow, 'targetWindow', 60))
   if ('clientUpdate' in body) set('client_update', text(body.clientUpdate, 'clientUpdate', 1000))
   if ('published' in body) set('published', body.published === true ? 1 : 0)
@@ -681,6 +746,7 @@ app.patch('/api/admin/roadmap/:id', async (c) => {
     set('updated_at', now())
     stmts.push([`UPDATE roadmap_items SET ${sets.join(', ')} WHERE id = $${vals.length + 1}`, [...vals.map(String), item.id]])
   }
+  if (movedTo) stmts.push(['INSERT INTO roadmap_events (item_id, at, by, text) VALUES ($1, $2, $3, $4)', [item.id, now(), 'admin', `Moved from ${item.state} to ${movedTo}`]])
   if ('reportIds' in body) {
     const links = await linkStatements(item.id, item.client_id, body.reportIds)
     stmts.push(...links)
@@ -688,7 +754,23 @@ app.patch('/api/admin/roadmap/:id', async (c) => {
   }
   if (stmts.length) await batch(stmts)
   const fresh = await loadItem(admin, item.id)
-  return c.json({ item: serializeItem(fresh, admin, (await linkedReports([item.id])).get(item.id) ?? []) })
+  return c.json({ item: serializeItem(fresh, admin, (await linkedReports([item.id])).get(item.id) ?? [], await lastMoves([item.id])) })
+})
+
+// A client can rearrange the cards on their own roadmap. Every move is recorded and the team is told.
+app.patch('/api/roadmap/:id', async (c) => {
+  const user = requireClient(c)
+  const item = await loadItem(user, c.req.param('id'))
+  const state = oneOf((await json(c)).state, ROADMAP_STATES, 'state')
+  if (state !== item.state) {
+    await batch([
+      ['UPDATE roadmap_items SET state = $1, updated_at = $2 WHERE id = $3', [state, now(), item.id]],
+      ['INSERT INTO roadmap_events (item_id, at, by, text) VALUES ($1, $2, $3, $4)', [item.id, now(), 'client', `Moved from ${item.state} to ${state}`]],
+    ])
+    await mailAdmins(`${item.client_name} moved "${item.title}" to ${state}`, [`${user.name} (${item.client_name}) moved "${item.title}" from ${item.state} to ${state} on their roadmap.`], item.id, `${config.appUrl}/admin/roadmap`, 'Open the roadmap')
+  }
+  const fresh = await loadItem(user, item.id)
+  return c.json({ item: serializeItem(fresh, user, (await linkedReports([item.id])).get(item.id) ?? [], await lastMoves([item.id])) })
 })
 
 app.delete('/api/admin/roadmap/:id', async (c) => {
@@ -703,7 +785,9 @@ app.delete('/api/admin/roadmap/:id', async (c) => {
 app.get('/api/admin/clients', async (c) => {
   requireAdmin(c)
   const clients = await all<{ id: string; name: string; created_at: string }>('SELECT id, name, created_at FROM clients ORDER BY name')
-  const users = await all<{ id: string; email: string; name: string; client_id: string }>("SELECT id, email, name, client_id FROM users WHERE role = 'client' ORDER BY name")
+  const users = await all<{ id: string; email: string; name: string; client_id: string }>(
+    "SELECT u.id, u.email, u.name, m.client_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.role = 'client' ORDER BY u.name",
+  )
   return c.json({
     clients: clients.map((cl) => ({ id: cl.id, name: cl.name, createdAt: cl.created_at, users: users.filter((u) => u.client_id === cl.id).map(({ id, email, name }) => ({ id, email, name })) })),
   })
@@ -725,16 +809,28 @@ app.post('/api/admin/clients/:id/users', async (c) => {
   const email = text(body.email, 'email', 200, true).toLowerCase()
   const name = text(body.name, 'name', 100, true)
   if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address')
-  if (await one('SELECT id FROM users WHERE email = $1', email)) throw new HttpError(409, 'A user with this email already exists')
-  const id = crypto.randomUUID()
-  await run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES ($1, $2, $3, 'client', $4, $5)", id, email, name, client.id, now())
+  // Someone who already has an account can be added to another project. They keep one sign-in.
+  const existing = await one<{ id: string; role: string; name: string }>('SELECT id, role, name FROM users WHERE email = $1', email)
+  let id: string
+  let addedToExisting = false
+  if (existing) {
+    if (existing.role !== 'client') throw new HttpError(409, 'This address belongs to a team member.')
+    if (await one('SELECT 1 AS x FROM memberships WHERE user_id = $1 AND client_id = $2', existing.id, client.id)) throw new HttpError(409, 'They are already in this project.')
+    id = existing.id
+    addedToExisting = true
+    await run('INSERT INTO memberships (user_id, client_id) VALUES ($1, $2)', id, client.id)
+  } else {
+    id = crypto.randomUUID()
+    await run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES ($1, $2, $3, 'client', $4, $5)", id, email, name, client.id, now())
+    await run('INSERT INTO memberships (user_id, client_id) VALUES ($1, $2)', id, client.id)
+  }
   const emailSent = await sendQuietly({
     to: email,
-    subject: `You have been invited to report issues for ${client.name}`,
-    text: `Hi ${name},\n\nYou can now send us bug and UAT reports as short videos.\nSign in with your email (no password needed): ${config.appUrl}`,
-    html: layout(`Welcome, ${name}`, `<p>You can now send us bug and UAT reports as short videos for <strong>${escapeHtml(client.name)}</strong>. Sign in with your email, no password needed.</p>`, { label: 'Open the portal', url: config.appUrl }),
+    subject: addedToExisting ? `You now have access to ${client.name}` : `You have been invited to report issues for ${client.name}`,
+    text: `Hi ${existing?.name ?? name},\n\n${addedToExisting ? `You can now also send reports and see the roadmap for ${client.name}. Use the project menu to switch between your projects.` : 'You can now send us bug and UAT reports as short videos.'}\nSign in with your email (no password needed): ${config.appUrl}`,
+    html: layout(addedToExisting ? `You now have access to ${client.name}` : `Welcome, ${name}`, `<p>${addedToExisting ? `You can now also send reports and see the roadmap for <strong>${escapeHtml(client.name)}</strong>. Use the project menu to switch between your projects.` : `You can now send us bug and UAT reports as short videos for <strong>${escapeHtml(client.name)}</strong>. Sign in with your email, no password needed.`}</p>`, { label: 'Open SEAM', url: config.appUrl }),
   })
-  return c.json({ user: { id, email, name }, emailSent }, 201)
+  return c.json({ user: { id, email, name: existing?.name ?? name }, emailSent, addedToExisting }, 201)
 })
 
 // ---------- scheduled housekeeping (Vercel Cron) ----------

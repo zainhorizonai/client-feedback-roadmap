@@ -8,10 +8,9 @@ import { ClientShell } from './components/ClientShell'
 import { Skeleton } from './components/ui'
 import { SignIn } from './pages/SignIn'
 import { Verify } from './pages/Verify'
-import { ClientReports } from './pages/ClientReports'
+import { ClientHome } from './pages/ClientHome'
 import { NewReport } from './pages/NewReport'
 import { ReportDetail } from './pages/ReportDetail'
-import { ClientRoadmap } from './pages/ClientRoadmap'
 import { AdminInbox } from './pages/AdminInbox'
 import { AdminTracker } from './pages/AdminTracker'
 import { AdminRoadmap } from './pages/AdminRoadmap'
@@ -61,10 +60,10 @@ function Routed() {
     <Routes>
       <Route path="/auth/verify" element={<Navigate to="/reports" replace />} />
       <Route element={<ClientShell />}>
-        <Route path="/reports" element={<ClientReports />} />
+        <Route path="/reports" element={<ClientHome />} />
         <Route path="/reports/new" element={<NewReport />} />
         <Route path="/reports/:id" element={<ReportDetail />} />
-        <Route path="/roadmap" element={<ClientRoadmap />} />
+        <Route path="/roadmap" element={<Navigate to="/reports?view=board" replace />} />
         <Route path="*" element={<Navigate to="/reports" replace />} />
       </Route>
     </Routes>

@@ -28,6 +28,26 @@ handoff) and are mapped onto Tailwind in `src/index.css`. The brand SVGs are in 
 - **Data:** roadmap stages kept on reports by the previous version are converted into published roadmap items
   automatically the first time the new version starts.
 
+## Where this goes beyond or against the SEAM spec (on request)
+
+These were asked for directly, so they replace the spec's version:
+
+- **One client view.** Clients have a single page, **My items**, instead of separate My reports and Roadmap pages. It has a
+  List and a Roadmap stages view, a Bugs and UAT / Roadmap filter, a status filter (fix statuses and roadmap stages),
+  search, and Pending / Waiting for you / Done counts.
+- **Features and questions go to the roadmap automatically** as published cards in Under review, linked to the report.
+  Bugs and UAT findings stay in the fix list. The roadmap still also holds anything the team adds and publishes.
+- **Clients can drag their own roadmap cards between stages** (or use the menu on the card). The spec said clients get no
+  controls for changing plans. Every move is recorded with who and when, the team is emailed, and admins see "Moved by the
+  client" on the card. Bugs are placed on the board by their status and cannot be dragged.
+- **Clients can approve anything as done**, not only a fix waiting to be verified. A fix in Ready to verify is recorded as
+  "Verified by client". Anything else is "Closed by client". Approving a feature request also finishes its roadmap card when
+  the card stands for that one request.
+- **A client can belong to several projects** with one sign-in and a project switcher that shows pending work per project.
+  Inviting an existing client to another project adds them to it.
+- **Roadmap cards carry the ids of the client's own linked reports** so a card can lead to its conversation. These are
+  reports in the client's own projects that they can already open.
+
 ## Design defaults used (from the spec's own list)
 
 Breakpoints 768px and 1024px, default tracker columns, export scope, 224px sidebar and 480px drawer. Lower-frequency

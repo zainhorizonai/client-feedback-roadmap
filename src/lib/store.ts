@@ -65,6 +65,8 @@ async function act(call: () => Promise<{ report: Report }>, okText?: string): Pr
 }
 
 export interface NewReportInput {
+  /** Which project, for people who belong to more than one. */
+  clientId?: string
   title: string
   description: string
   pageUrl: string
@@ -112,5 +114,10 @@ export const addReply = (id: string, text: string) =>
 export const addClientComment = (id: string, text: string) =>
   act(() => api.post(`/api/reports/${id}/comments`, { text }), 'Comment sent.')
 
+/** Approve anything as done. A fix that was waiting to be verified is recorded as verified. */
+export const approveReport = (id: string, note = '') =>
+  act(() => api.post(`/api/reports/${id}/approve`, { note }), 'Thanks. Marked as done.')
+
+/** Fixed = approve. Still broken sends it back to the team with a note. */
 export const clientConfirm = (id: string, fixed: boolean, note: string) =>
-  act(() => api.post(`/api/reports/${id}/confirm`, { fixed, note }), fixed ? 'Thanks for confirming. This report is resolved.' : 'Thanks. We will take another look.')
+  fixed ? approveReport(id, note) : act(() => api.post(`/api/reports/${id}/confirm`, { fixed: false, note }), 'Thanks. We will take another look.')
