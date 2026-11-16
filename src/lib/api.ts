@@ -33,6 +33,7 @@ export const api = {
 }
 
 export type UploadMode = 'server' | 'blob'
+export type UploadFlow = 'token' | 'presigned'
 
 const EXT: Record<string, string> = {
   'video/webm': 'webm',
@@ -48,22 +49,23 @@ const EXT: Record<string, string> = {
  *  - blob:   the browser uploads straight to Vercel Blob, then tells the API it is done.
  *  - server: the browser PUTs the file to the API (local development).
  */
-export async function uploadVideo(reportId: string, blob: Blob, mode: UploadMode, onProgress: (fraction: number) => void): Promise<Report> {
+export async function uploadVideo(reportId: string, blob: Blob, mode: UploadMode, flow: UploadFlow | undefined, onProgress: (fraction: number) => void): Promise<Report> {
   const mime = (blob.type || '').split(';')[0] || 'video/webm'
   if (!EXT[mime]) throw new ApiError(415, 'Unsupported video type. Use WebM, MP4 or MOV.')
-  return mode === 'blob' ? uploadToBlob(reportId, blob, mime, onProgress) : uploadToServer(reportId, blob, mime, onProgress)
+  return mode === 'blob' ? uploadToBlob(reportId, blob, mime, flow ?? 'token', onProgress) : uploadToServer(reportId, blob, mime, onProgress)
 }
 
-async function uploadToBlob(reportId: string, blob: Blob, mime: string, onProgress: (f: number) => void): Promise<Report> {
+async function uploadToBlob(reportId: string, blob: Blob, mime: string, flow: UploadFlow, onProgress: (f: number) => void): Promise<Report> {
   // Loaded on demand so the Blob client is only downloaded when it is needed.
-  const { upload } = await import('@vercel/blob/client')
+  const { upload, uploadPresigned } = await import('@vercel/blob/client')
   let pathname: string
   try {
-    const res = await upload(`reports/${reportId}/video.${EXT[mime]}`, blob, {
+    const send = flow === 'presigned' ? uploadPresigned : upload
+    const res = await send(`reports/${reportId}/video.${EXT[mime]}`, blob, {
       access: 'private',
       handleUploadUrl: `/api/reports/${reportId}/blob-token`,
       contentType: mime,
-      multipart: blob.size > 20 * 1024 * 1024,
+      multipart: flow === 'token' && blob.size > 20 * 1024 * 1024,
       onUploadProgress: (p) => onProgress(p.percentage / 100),
     })
     pathname = res.pathname

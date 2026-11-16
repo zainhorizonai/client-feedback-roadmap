@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import { api, ApiError, uploadVideo, type UploadMode } from './api'
+import { api, ApiError, uploadVideo, type UploadFlow, type UploadMode } from './api'
 import { notify } from './toast'
 import type { Report, Severity, Status } from './types'
 
@@ -72,9 +72,9 @@ export interface NewReportInput {
 }
 
 export async function createReport(input: NewReportInput, video: Blob, onProgress: (f: number) => void): Promise<Report> {
-  const { report, upload } = await api.post<{ report: Report; upload: { mode: UploadMode } }>('/api/reports', input)
+  const { report, upload } = await api.post<{ report: Report; upload: { mode: UploadMode; flow?: UploadFlow } }>('/api/reports', input)
   try {
-    const done = await uploadVideo(report.id, video, upload.mode, onProgress)
+    const done = await uploadVideo(report.id, video, upload.mode, upload.flow, onProgress)
     upsert(done)
     return done
   } catch (e) {

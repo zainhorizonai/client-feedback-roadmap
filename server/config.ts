@@ -22,6 +22,9 @@ export const pickBlobToken = (e: Env) => pickEnv(e, ['BLOB_READ_WRITE_TOKEN'])
 
 const dbVar = pickDatabaseUrl(env)
 const blobVar = pickBlobToken(env)
+// Newer Blob stores authenticate with a store id and Vercel's OIDC identity instead of a read-write token.
+const blobStoreVar = pickEnv(env, ['BLOB_STORE_ID'])
+const blobWebhookVar = pickEnv(env, ['BLOB_WEBHOOK_PUBLIC_KEY'])
 
 // On Vercel the public URL is derived from the deployment when APP_URL is not set.
 function resolveAppUrl(): string {
@@ -46,8 +49,11 @@ export const config = {
   /** Set by the Vercel Blob integration. Unset in local dev, where videos are stored on disk. */
   blobToken: blobVar?.value ?? '',
   blobEnvName: blobVar?.name ?? '',
+  blobStoreId: blobStoreVar?.value ?? '',
+  blobWebhookKey: blobWebhookVar?.value ?? '',
   cronSecret: env.CRON_SECRET ?? '',
-  adminEmails: (env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  // ADMIN_EMAIL (singular) is accepted too, since it is an easy slip.
+  adminEmails: (env.ADMIN_EMAILS ?? env.ADMIN_EMAIL ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   emailProvider: (env.EMAIL_PROVIDER ?? 'console') as 'console' | 'resend',
   resendKey: env.RESEND_API_KEY ?? '',
   emailFrom: env.EMAIL_FROM ?? 'Feedback Portal <onboarding@resend.dev>',

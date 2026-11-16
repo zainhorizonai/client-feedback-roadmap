@@ -213,6 +213,7 @@ describe('Blob upload mode', () => {
     original = getStorage()
     setStorageForTests({
       mode: 'blob',
+      uploadFlow: 'presigned',
       async clientUpload(_req, body, reportId) {
         issued.push({ reportId, body })
         return { type: 'blob.generate-client-token', clientToken: 'fake-token' }
@@ -229,6 +230,7 @@ describe('Blob upload mode', () => {
     await sam.signIn('sam@globex.com')
     const created = await jane.json('POST', '/api/reports', { title: 'Blob report' })
     assert.equal(created.data.upload.mode, 'blob')
+    assert.equal(created.data.upload.flow, 'presigned')
     id = created.data.report.id
   })
 

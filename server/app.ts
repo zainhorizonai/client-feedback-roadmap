@@ -209,7 +209,9 @@ app.get('/api/health/deep', async (c) => {
   return c.json({
     database,
     databaseVariableFound: config.databaseUrl ? config.databaseEnvName : null,
-    blobVariableFound: config.blobToken ? config.blobEnvName : null,
+    blobAuth: config.blobToken ? 'token' : config.blobStoreId ? 'store-id (OIDC)' : null,
+    blobVariableFound: config.blobToken ? config.blobEnvName : config.blobStoreId ? 'BLOB_STORE_ID' : null,
+    blobWebhookKeyFound: !!config.blobWebhookKey,
     onVercel: config.onVercel,
     emailProvider: config.emailProvider,
     resendKeySet: !!config.resendKey,
@@ -290,7 +292,7 @@ app.post('/api/reports', async (c) => {
     }
   }
   if (!id) throw new HttpError(409, 'Could not create the report, please try again')
-  return c.json({ report: await withHistory(await loadReport(user, id), user), upload: { mode: storage.mode } }, 201)
+  return c.json({ report: await withHistory(await loadReport(user, id), user), upload: { mode: storage.mode, flow: storage.uploadFlow } }, 201)
 })
 
 /** Marks a draft as submitted. One atomic statement, so a report can only be finalized once. */

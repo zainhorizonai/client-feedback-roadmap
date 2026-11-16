@@ -29,6 +29,8 @@ export interface Stored { size: number; mime: string }
 
 export interface Storage {
   mode: 'server' | 'blob'
+  /** blob mode: which client upload protocol the browser must use. */
+  uploadFlow?: 'token' | 'presigned'
   /** server mode: stream the request body to storage. Returns the stored path. */
   save?(reportId: string, mime: string, body: ReadableStream<Uint8Array>): Promise<{ path: string; size: number }>
   /** blob mode: issue a client upload token for a report. Rejects anything outside that report's folder. */
@@ -105,29 +107,63 @@ function localStorageDriver(): Storage {
 
 // ---------- Vercel Blob ----------
 
+// Two ways a Blob store can be connected, both supported:
+//  - token:     BLOB_READ_WRITE_TOKEN is set. Browser uses upload() with a client token.
+//  - presigned: only BLOB_STORE_ID (+ BLOB_WEBHOOK_PUBLIC_KEY) is set and the platform authenticates with
+//               OIDC. Browser uses uploadPresigned() with a signed URL. Newer stores work this way.
+
 function blobDriver(): Storage {
   const SIGNED_URL_TTL_MS = 5 * 60 * 1000
+  const usesToken = !!config.blobToken
+  // Credentials passed to every server-side Blob call. With OIDC the SDK finds the identity itself.
+  const auth = usesToken ? { token: config.blobToken } : { storeId: config.blobStoreId }
+
+  const checkPath = (pathname: string, reportId: string) => {
+    const ext = pathname.split('.').pop() ?? ''
+    if (!pathname.startsWith(blobPrefix(reportId)) || pathname.includes('..') || !Object.values(EXT).includes(ext)) {
+      throw new Error('Invalid upload path')
+    }
+  }
+
   return {
     mode: 'blob',
+    uploadFlow: usesToken ? 'token' : 'presigned',
 
     async clientUpload(request, body, reportId) {
-      const { handleUpload } = await import('@vercel/blob/client')
-      return handleUpload({
-        token: config.blobToken,
+      // No onUploadCompleted in either flow: the browser tells us when it is done (POST .../video/complete)
+      // and we verify the blob ourselves, so no unauthenticated webhook is exposed.
+      if (usesToken) {
+        const { handleUpload } = await import('@vercel/blob/client')
+        return handleUpload({
+          token: config.blobToken,
+          request,
+          body: body as Parameters<typeof handleUpload>[0]['body'],
+          onBeforeGenerateToken: async (pathname) => {
+            checkPath(pathname, reportId)
+            return { allowedContentTypes: Object.keys(EXT), maximumSizeInBytes: config.maxVideoBytes, addRandomSuffix: true, allowOverwrite: false }
+          },
+        })
+      }
+      const { handleUploadPresigned } = await import('@vercel/blob/client')
+      const { issueSignedToken } = await import('@vercel/blob')
+      return handleUploadPresigned({
         request,
-        body: body as Parameters<typeof handleUpload>[0]['body'],
-        // No onUploadCompleted: the browser tells us when it is done (POST .../video/complete) and we
-        // verify the blob ourselves, so no unauthenticated webhook is exposed.
-        onBeforeGenerateToken: async (pathname) => {
-          const ext = pathname.split('.').pop() ?? ''
-          if (!pathname.startsWith(blobPrefix(reportId)) || pathname.includes('..') || !Object.values(EXT).includes(ext)) {
-            throw new Error('Invalid upload path')
-          }
-          return {
+        webhookPublicKey: config.blobWebhookKey || undefined,
+        body: body as Parameters<typeof handleUploadPresigned>[0]['body'],
+        getSignedToken: async (pathname) => {
+          checkPath(pathname, reportId)
+          const validUntil = Date.now() + 60 * 60 * 1000
+          const token = await issueSignedToken({
+            ...auth,
+            pathname,
+            operations: ['put'],
+            validUntil,
             allowedContentTypes: Object.keys(EXT),
             maximumSizeInBytes: config.maxVideoBytes,
-            addRandomSuffix: true,
-            allowOverwrite: false,
+          })
+          return {
+            token,
+            urlOptions: { validUntil, allowedContentTypes: Object.keys(EXT), maximumSizeInBytes: config.maxVideoBytes, addRandomSuffix: true, allowOverwrite: false },
           }
         },
       })
@@ -136,7 +172,7 @@ function blobDriver(): Storage {
     async inspect(pathname) {
       const { head } = await import('@vercel/blob')
       try {
-        const h = await head(pathname, { token: config.blobToken })
+        const h = await head(pathname, auth)
         return { size: h.size, mime: normalizeMime(h.contentType) }
       } catch {
         return null
@@ -148,7 +184,7 @@ function blobDriver(): Storage {
       // expires in minutes. The CDN then serves the bytes, including Range requests for seeking.
       const { issueSignedToken, presignUrl } = await import('@vercel/blob')
       const validUntil = Date.now() + SIGNED_URL_TTL_MS
-      const token = await issueSignedToken({ pathname, operations: ['get'], validUntil, token: config.blobToken })
+      const token = await issueSignedToken({ ...auth, pathname, operations: ['get'], validUntil })
       const { presignedUrl } = await presignUrl(token, { operation: 'get', pathname, validUntil, access: 'private' })
       return new Response(null, { status: 302, headers: { Location: presignedUrl, 'Cache-Control': 'private, no-store' } })
     },
@@ -159,8 +195,8 @@ let current: Storage | null = null
 
 export function getStorage(): Storage {
   if (!current) {
-    if (config.blobToken) current = blobDriver()
-    else if (config.onVercel) throw new Error('BLOB_READ_WRITE_TOKEN is not set. Add a Blob store to this Vercel project.')
+    if (config.blobToken || config.blobStoreId) current = blobDriver()
+    else if (config.onVercel) throw new Error('No Blob store is connected. Add a Blob store to this Vercel project.')
     else current = localStorageDriver()
   }
   return current
