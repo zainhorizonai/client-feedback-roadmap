@@ -76,10 +76,9 @@ export function NewReport() {
             <CheckCircle2 className="mx-auto h-10 w-10 text-[var(--seam-success-fg)]" aria-hidden="true" />
             <h1 className="mt-3 font-semibold">{onRoadmap ? 'Added to your roadmap' : 'Report received'}</h1>
             <p className="mt-2 text-muted">Your reference is <Mono className="font-semibold text-ink">{doneId}</Mono>. {onRoadmap ? 'You can follow it and move it between stages on your roadmap.' : 'We will update you here and by email.'}</p>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
-              <Button onClick={() => nav(`/reports/${doneId}`)}>View report</Button>
-              {onRoadmap && <ButtonLink to="/reports?view=board" variant="secondary">See the roadmap</ButtonLink>}
-              <ButtonLink to="/reports" variant="secondary">Back to my items</ButtonLink>
+            <div className="mt-5 flex flex-col items-center gap-2">
+              <Button onClick={() => nav(`/reports/${doneId}`)}>View</Button>
+              <ButtonLink to="/reports" variant="tertiary">Back to my items</ButtonLink>
             </div>
           </div>
         </div>
@@ -160,11 +159,11 @@ export function NewReport() {
         {error && (
           <div role="alert" className="rounded-card bg-[var(--seam-error-bg)] p-3 text-[var(--seam-error-fg)]">
             <p className="font-semibold">It did not send</p>
-            <p>{error} Your details and video are still here. Press Send to try again.</p>
+            <p>{error} Your details and video are still here. Press Try again to send it.</p>
           </div>
         )}
         <div className="flex items-center justify-end gap-3 border-t border-line pt-4">
-          <Button type="submit" pending={busy}>{busy ? (video ? `Uploading ${Math.round(progress * 100)}%` : 'Sending') : error ? 'Try again' : 'Send report'}</Button>
+          <Button type="submit" pending={busy}>{busy ? (video ? `Uploading ${Math.round(progress * 100)}%` : 'Sending') : error ? 'Try again' : 'Send'}</Button>
         </div>
       </form>
     </div>

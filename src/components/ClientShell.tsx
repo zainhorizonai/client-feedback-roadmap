@@ -38,7 +38,7 @@ function Header() {
           </NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <Link to="/reports/new" className={buttonClass('primary')}><Plus className="h-4 w-4" aria-hidden="true" />New report</Link>
+          <Link to="/reports/new" className={buttonClass('primary')}><Plus className="h-4 w-4" aria-hidden="true" />New</Link>
           <button onClick={signOut} aria-label={`Sign out ${user?.name}`} title="Sign out" className="flex h-11 w-11 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink md:h-9 md:w-9"><LogOut className="h-4 w-4" aria-hidden="true" /></button>
         </div>
       </div>

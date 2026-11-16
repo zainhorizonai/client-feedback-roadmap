@@ -8,13 +8,13 @@ import { buildEntries, countEntries, type Entry } from '../lib/entries'
 import { ROADMAP_STATES, STATUSES, type RoadmapState } from '../lib/types'
 import { ItemsBoard } from '../components/ItemsBoard'
 import { ItemDrawer } from '../components/ItemDrawer'
-import { Button, ButtonLink, EmptyState, fmtDate, KindTag, Mono, PageHeader, Skeleton, StageBadge, StatusBadge } from '../components/ui'
+import { Button, EmptyState, fmtDate, KindTag, Mono, PageHeader, Skeleton, StageBadge, StatusBadge } from '../components/ui'
 
 type View = 'list' | 'board'
 type Type = 'all' | 'fixes' | 'roadmap'
 type Show = 'all' | 'pending' | 'waiting' | 'done'
 
-const TYPES: { id: Type; label: string }[] = [{ id: 'all', label: 'All' }, { id: 'fixes', label: 'Bugs and UAT' }, { id: 'roadmap', label: 'Roadmap' }]
+const TYPES: { id: Type; label: string }[] = [{ id: 'all', label: 'All' }, { id: 'fixes', label: 'UAT/Bugs' }, { id: 'roadmap', label: 'Roadmap' }]
 
 /**
  * One place for everything a client has sent or follows. Switch between a list and the roadmap board,
@@ -83,7 +83,7 @@ export function ClientHome() {
 
   return (
     <>
-      <PageHeader eyebrow={project?.name} title="My items" subtitle="Bugs, UAT findings, feature requests and questions, all in one place." actions={<ButtonLink to="/reports/new">New report</ButtonLink>} />
+      <PageHeader eyebrow={project?.name} title="My items" subtitle="UAT/Bugs, feature requests and questions, all in one place." />
 
       <div className="mb-6 grid gap-3 sm:grid-cols-3" role="group" aria-label="Quick filters">
         {tile('pending', 'Pending', counts.pending, 'Not done yet')}
@@ -92,7 +92,7 @@ export function ClientHome() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        {segment<View>('View', view, [{ id: 'list', label: 'List' }, { id: 'board', label: 'Roadmap stages' }], (v) => set({ view: v }))}
+        {segment<View>('View', view, [{ id: 'list', label: 'List' }, { id: 'board', label: 'Card' }], (v) => set({ view: v }))}
         {segment<Type>('Show', type, TYPES, (v) => set({ type: v }))}
         <select className="input !w-auto" aria-label="Filter by status" value={status} onChange={(e) => set({ status: e.target.value })}>
           <option value="">Any status</option>
@@ -107,8 +107,8 @@ export function ClientHome() {
       </div>
 
       {!loaded ? <Skeleton rows={6} /> : all.length === 0 ? (
-        <EmptyState icon={<Inbox className="h-9 w-9" />} title="Nothing here yet" action={<ButtonLink to="/reports/new">New report</ButtonLink>}>
-          Report a bug, share an idea or ask a question. Ideas and questions go on your roadmap. A video helps, and you can always send text only.
+        <EmptyState icon={<Inbox className="h-9 w-9" />} title="Nothing here yet">
+          Press New to send a bug, an idea or a question. Ideas and questions go on your roadmap. A video helps, and you can always send text only.
         </EmptyState>
       ) : rows.length === 0 ? (
         <EmptyState title="No items match these filters" action={<Button variant="secondary" onClick={clear}>Clear filters</Button>} />
