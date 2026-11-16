@@ -191,6 +191,35 @@ app.get('/api/health', (c) => c.json({ ok: true }))
 
 app.get('/api/me', (c) => c.json({ user: c.get('user') }))
 
+const secretMatches = (given: string, expected: string) =>
+  !!expected && given.length === expected.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))
+
+/** Strips anything that looks like a URL or host from an error before it is shown. */
+const scrub = (e: unknown) => {
+  const x = e as { name?: string; code?: string; message?: string }
+  const msg = String(x?.message ?? e).replace(/\S+:\/\/\S+/g, '[url]').replace(/\b[\w-]+(\.[\w-]+){2,}\b/g, '[host]').slice(0, 200)
+  return [x?.name, x?.code, msg].filter(Boolean).join(' | ')
+}
+
+// Setup check for the person deploying. Protected by CRON_SECRET: /api/health/deep?key=<CRON_SECRET>
+app.get('/api/health/deep', async (c) => {
+  if (!secretMatches(c.req.query('key') ?? '', config.cronSecret)) return c.json({ error: 'Not found' }, 404)
+  let database = 'ok'
+  try { await one('SELECT 1 AS ok') } catch (e) { database = `error: ${scrub(e)}` }
+  return c.json({
+    database,
+    databaseVariableFound: config.databaseUrl ? config.databaseEnvName : null,
+    blobVariableFound: config.blobToken ? config.blobEnvName : null,
+    onVercel: config.onVercel,
+    emailProvider: config.emailProvider,
+    resendKeySet: !!config.resendKey,
+    emailFrom: config.emailFrom,
+    adminEmails: config.adminEmails.length,
+    cronSecretSet: true,
+    appUrl: config.appUrl,
+  })
+})
+
 app.post('/api/auth/request', async (c) => {
   const body = await json(c)
   const email = text(body.email, 'email', 200, true).toLowerCase()

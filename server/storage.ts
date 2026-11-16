@@ -113,6 +113,7 @@ function blobDriver(): Storage {
     async clientUpload(request, body, reportId) {
       const { handleUpload } = await import('@vercel/blob/client')
       return handleUpload({
+        token: config.blobToken,
         request,
         body: body as Parameters<typeof handleUpload>[0]['body'],
         // No onUploadCompleted: the browser tells us when it is done (POST .../video/complete) and we
@@ -135,7 +136,7 @@ function blobDriver(): Storage {
     async inspect(pathname) {
       const { head } = await import('@vercel/blob')
       try {
-        const h = await head(pathname)
+        const h = await head(pathname, { token: config.blobToken })
         return { size: h.size, mime: normalizeMime(h.contentType) }
       } catch {
         return null
@@ -147,7 +148,7 @@ function blobDriver(): Storage {
       // expires in minutes. The CDN then serves the bytes, including Range requests for seeking.
       const { issueSignedToken, presignUrl } = await import('@vercel/blob')
       const validUntil = Date.now() + SIGNED_URL_TTL_MS
-      const token = await issueSignedToken({ pathname, operations: ['get'], validUntil })
+      const token = await issueSignedToken({ pathname, operations: ['get'], validUntil, token: config.blobToken })
       const { presignedUrl } = await presignUrl(token, { operation: 'get', pathname, validUntil, access: 'private' })
       return new Response(null, { status: 302, headers: { Location: presignedUrl, 'Cache-Control': 'private, no-store' } })
     },

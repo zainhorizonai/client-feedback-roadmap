@@ -329,3 +329,26 @@ describe('housekeeping and limits', () => {
     assert.equal(new Set(ids).size, 5)
   })
 })
+
+describe('setup helpers', () => {
+  it('finds database and blob variables even when Vercel adds a prefix', async () => {
+    const { pickDatabaseUrl, pickBlobToken } = await import('../config.js')
+    assert.equal(pickDatabaseUrl({ DATABASE_URL: 'a', STORAGE_DATABASE_URL: 'b' })?.value, 'a')
+    assert.deepEqual(pickDatabaseUrl({ STORAGE_DATABASE_URL: 'b', STORAGE_POSTGRES_URL: 'c' }), { name: 'STORAGE_DATABASE_URL', value: 'b' })
+    assert.deepEqual(pickDatabaseUrl({ POSTGRES_URL: 'p' }), { name: 'POSTGRES_URL', value: 'p' })
+    assert.equal(pickDatabaseUrl({ STORAGE_DATABASE_URL_UNPOOLED: 'x' }), null)
+    assert.deepEqual(pickBlobToken({ MY_BLOB_READ_WRITE_TOKEN: 't' }), { name: 'MY_BLOB_READ_WRITE_TOKEN', value: 't' })
+    assert.equal(pickBlobToken({}), null)
+  })
+
+  it('serves the setup check only with the secret and never leaks it', async () => {
+    const c = new Client()
+    assert.equal((await c.req('GET', '/api/health/deep')).status, 404)
+    assert.equal((await c.req('GET', '/api/health/deep?key=wrong')).status, 404)
+    const ok = await c.json('GET', '/api/health/deep?key=test-cron-secret')
+    assert.equal(ok.status, 200)
+    assert.equal(ok.data.database, 'ok')
+    assert.equal(ok.data.adminEmails, 1)
+    assert.equal(JSON.stringify(ok.data).includes('test-cron-secret'), false)
+  })
+})

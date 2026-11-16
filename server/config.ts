@@ -2,6 +2,27 @@ import path from 'node:path'
 
 const env = process.env
 
+type Env = Record<string, string | undefined>
+
+/**
+ * Vercel's Storage dialog can add a custom prefix to the variables it creates (for example
+ * STORAGE_DATABASE_URL). Accept the standard name first, then any prefixed variant.
+ */
+export function pickEnv(e: Env, names: string[]): { name: string; value: string } | null {
+  for (const n of names) if (e[n]) return { name: n, value: e[n]! }
+  for (const n of names) {
+    const hit = Object.keys(e).sort().find((k) => k.endsWith(`_${n}`) && e[k])
+    if (hit) return { name: hit, value: e[hit]! }
+  }
+  return null
+}
+
+export const pickDatabaseUrl = (e: Env) => pickEnv(e, ['DATABASE_URL', 'POSTGRES_URL'])
+export const pickBlobToken = (e: Env) => pickEnv(e, ['BLOB_READ_WRITE_TOKEN'])
+
+const dbVar = pickDatabaseUrl(env)
+const blobVar = pickBlobToken(env)
+
 // On Vercel the public URL is derived from the deployment when APP_URL is not set.
 function resolveAppUrl(): string {
   if (env.APP_URL) return env.APP_URL.replace(/\/$/, '')
@@ -17,12 +38,14 @@ export const config = {
   appUrl,
   onVercel: !!env.VERCEL,
   /** Postgres connection string. Unset in local dev, where an embedded Postgres (PGlite) is used instead. */
-  databaseUrl: env.DATABASE_URL ?? env.POSTGRES_URL ?? '',
+  databaseUrl: dbVar?.value ?? '',
+  databaseEnvName: dbVar?.name ?? '',
   /** Tests run the embedded database in memory. */
   memoryDb: env.DB_IN_MEMORY === '1',
   dataDir: path.resolve(env.DATA_DIR ?? './data'),
   /** Set by the Vercel Blob integration. Unset in local dev, where videos are stored on disk. */
-  blobToken: env.BLOB_READ_WRITE_TOKEN ?? '',
+  blobToken: blobVar?.value ?? '',
+  blobEnvName: blobVar?.name ?? '',
   cronSecret: env.CRON_SECRET ?? '',
   adminEmails: (env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   emailProvider: (env.EMAIL_PROVIDER ?? 'console') as 'console' | 'resend',
