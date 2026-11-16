@@ -1,4 +1,4 @@
-import { config } from './config'
+import { config } from './config.js'
 
 interface Mail { to: string | string[]; subject: string; text: string; html: string }
 
@@ -31,7 +31,15 @@ export async function sendEmail(mail: Mail): Promise<void> {
   console.log(`\n[email:console] to=${to.join(', ')}\n  subject: ${mail.subject}\n  ${mail.text.replace(/\n/g, '\n  ')}\n`)
 }
 
-/** Fire and forget: a failed email must never fail the request that triggered it. */
-export function sendQuietly(mail: Mail) {
-  sendEmail(mail).catch((e) => console.error('[email] failed:', e instanceof Error ? e.message : e))
+/**
+ * Sends and swallows errors: a failed email must never fail the request that triggered it.
+ * Callers must await this. On serverless the function is frozen once the response is sent,
+ * so a fire-and-forget email can be lost.
+ */
+export async function sendQuietly(mail: Mail): Promise<void> {
+  try {
+    await sendEmail(mail)
+  } catch (e) {
+    console.error('[email] failed:', e instanceof Error ? e.message : e)
+  }
 }

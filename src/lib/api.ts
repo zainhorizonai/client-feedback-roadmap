@@ -32,13 +32,53 @@ export const api = {
   del: <T>(url: string) => request<T>('DELETE', url),
 }
 
-/** Uploads a video with progress. Uses XHR because fetch cannot report upload progress. */
-export function uploadVideo(reportId: string, blob: Blob, onProgress: (fraction: number) => void): Promise<Report> {
+export type UploadMode = 'server' | 'blob'
+
+const EXT: Record<string, string> = {
+  'video/webm': 'webm',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/ogg': 'ogv',
+  'video/x-matroska': 'mkv',
+  'video/3gpp': '3gp',
+}
+
+/**
+ * Uploads the video and finishes the report. Two paths, chosen by the server:
+ *  - blob:   the browser uploads straight to Vercel Blob, then tells the API it is done.
+ *  - server: the browser PUTs the file to the API (local development).
+ */
+export async function uploadVideo(reportId: string, blob: Blob, mode: UploadMode, onProgress: (fraction: number) => void): Promise<Report> {
+  const mime = (blob.type || '').split(';')[0] || 'video/webm'
+  if (!EXT[mime]) throw new ApiError(415, 'Unsupported video type. Use WebM, MP4 or MOV.')
+  return mode === 'blob' ? uploadToBlob(reportId, blob, mime, onProgress) : uploadToServer(reportId, blob, mime, onProgress)
+}
+
+async function uploadToBlob(reportId: string, blob: Blob, mime: string, onProgress: (f: number) => void): Promise<Report> {
+  // Loaded on demand so the Blob client is only downloaded when it is needed.
+  const { upload } = await import('@vercel/blob/client')
+  let pathname: string
+  try {
+    const res = await upload(`reports/${reportId}/video.${EXT[mime]}`, blob, {
+      access: 'private',
+      handleUploadUrl: `/api/reports/${reportId}/blob-token`,
+      contentType: mime,
+      multipart: blob.size > 20 * 1024 * 1024,
+      onUploadProgress: (p) => onProgress(p.percentage / 100),
+    })
+    pathname = res.pathname
+  } catch {
+    throw new ApiError(0, 'Upload failed. Check your connection and try again.')
+  }
+  const { report } = await api.post<{ report: Report }>(`/api/reports/${reportId}/video/complete`, { pathname })
+  return report
+}
+
+function uploadToServer(reportId: string, blob: Blob, mime: string, onProgress: (f: number) => void): Promise<Report> {
   return new Promise((resolve, reject) => {
-    const type = (blob.type || '').split(';')[0] || 'video/webm'
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', `/api/reports/${reportId}/video`)
-    xhr.setRequestHeader('Content-Type', type)
+    xhr.setRequestHeader('Content-Type', mime)
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total)
     xhr.onerror = () => reject(new ApiError(0, 'Upload failed. Check your connection and try again.'))
     xhr.onload = () => {

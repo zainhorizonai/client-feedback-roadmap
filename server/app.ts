@@ -2,11 +2,11 @@ import crypto from 'node:crypto'
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { serveStatic } from '@hono/node-server/serve-static'
-import { config } from './config'
-import { all, one, run, tx } from './db'
-import { clientIp, logout, rateLimited, requestLogin, verifyLogin, withUser, type AuthUser } from './auth'
-import { escapeHtml, layout, sendQuietly } from './email'
-import { isAllowedMime, normalizeMime, saveVideo, serveVideo, TooLargeError } from './storage'
+import { config } from './config.js'
+import { all, batch, isUniqueViolation, one, run } from './db.js'
+import { clientIp, logout, rateLimited, requestLogin, verifyLogin, withUser, type AuthUser } from './auth.js'
+import { escapeHtml, layout, sendQuietly } from './email.js'
+import { blobPrefix, extFor, getStorage, isAllowedMime, normalizeMime, TooLargeError } from './storage.js'
 
 type Env = { Variables: { user: AuthUser | null } }
 export const app = new Hono<Env>()
@@ -71,13 +71,15 @@ function requireClient(c: Context<Env>): AuthUser {
   return u
 }
 
+const maxMb = () => Math.round(config.maxVideoBytes / 1024 / 1024)
+
 // ---------- reports ----------
 
 interface ReportRow {
   id: string; seq: number; created_at: string; client_id: string; client_name: string
   reporter_id: string; reporter_name: string; reporter_email: string
   title: string; description: string; page_url: string; severity: string; status: Status
-  notes: string; resolution_url: string; video_path: string | null; resolved_at: string | null
+  notes: string; resolution_url: string; video_path: string | null; video_mime: string | null; resolved_at: string | null
 }
 interface HistoryRow { report_id: string; at: string; by: string; kind: string; text: string }
 
@@ -106,48 +108,53 @@ function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[]) {
   }
 }
 
-function historyFor(ids: string[]): Map<string, HistoryRow[]> {
+async function historyFor(ids: string[]): Promise<Map<string, HistoryRow[]>> {
   const map = new Map<string, HistoryRow[]>()
   if (ids.length === 0) return map
-  const rows = all<HistoryRow>(`SELECT report_id, at, by, kind, text FROM history WHERE report_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`, ...ids)
+  const rows = await all<HistoryRow>(
+    `SELECT report_id, at, by, kind, text FROM history WHERE report_id = ANY($1::text[]) ORDER BY id`,
+    // Both Postgres drivers accept an array literal for a text[] parameter.
+    `{${ids.map((i) => `"${i}"`).join(',')}}`,
+  )
   for (const h of rows) (map.get(h.report_id) ?? map.set(h.report_id, []).get(h.report_id)!).push(h)
   return map
 }
 
 /** Loads a report the user may see. Unknown and forbidden both read as 404 so ids cannot be probed. */
-function loadReport(user: AuthUser, id: string): ReportRow {
-  const r = one<ReportRow>(`${REPORT_SELECT} WHERE r.id = ?`, id)
+async function loadReport(user: AuthUser, id: string): Promise<ReportRow> {
+  const r = await one<ReportRow>(`${REPORT_SELECT} WHERE r.id = $1`, id)
   if (!r) throw new HttpError(404, 'Report not found')
   if (user.role === 'client' && r.client_id !== user.clientId) throw new HttpError(404, 'Report not found')
   return r
 }
 
-const addHistory = (id: string, by: 'client' | 'admin' | 'system', kind: string, msg: string) =>
-  run('INSERT INTO history (report_id, at, by, kind, text) VALUES (?, ?, ?, ?, ?)', id, now(), by, kind, msg)
+const withHistory = async (r: ReportRow, user: AuthUser) => serialize(r, user, (await historyFor([r.id])).get(r.id) ?? [])
 
-function adminEmails(): string[] {
-  return all<{ email: string }>("SELECT email FROM users WHERE role = 'admin'").map((a) => a.email)
+const addHistory = (id: string, by: 'client' | 'admin' | 'system', kind: string, msg: string) =>
+  run('INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', id, now(), by, kind, msg)
+
+async function adminEmails(): Promise<string[]> {
+  return (await all<{ email: string }>("SELECT email FROM users WHERE role = 'admin'")).map((a) => a.email)
 }
 
 const adminLink = (id: string) => `${config.appUrl}/admin?report=${id}`
 const clientLink = (id: string) => `${config.appUrl}/reports/${id}`
 
-function mailAdmins(subject: string, lines: string[], id: string) {
-  sendQuietly({
-    to: adminEmails(),
+async function mailAdmins(subject: string, lines: string[], id: string) {
+  await sendQuietly({
+    to: await adminEmails(),
     subject,
     text: `${lines.join('\n')}\n\n${adminLink(id)}`,
     html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'Open in tracker', url: adminLink(id) }),
   })
 }
-function mailClient(r: ReportRow, subject: string, lines: string[]) {
+const mailClient = (r: ReportRow, subject: string, lines: string[]) =>
   sendQuietly({
     to: r.reporter_email,
     subject,
     text: `Hi ${r.reporter_name},\n\n${lines.join('\n')}\n\n${clientLink(r.id)}`,
     html: layout(subject, `<p>Hi ${escapeHtml(r.reporter_name)},</p>${lines.map((l) => `<p>${escapeHtml(l)}</p>`).join('')}`, { label: 'View report', url: clientLink(r.id) }),
   })
-}
 
 // ---------- middleware ----------
 
@@ -172,7 +179,7 @@ app.use('/api/*', async (c, next) => {
   return next()
 })
 
-// Small JSON bodies only. The video upload route streams and enforces its own limit.
+// Small JSON bodies only. The local-disk video upload streams and enforces its own limit.
 app.use('/api/*', async (c, next) => {
   if (c.req.method === 'PUT' && c.req.path.endsWith('/video')) return next()
   return bodyLimit({ maxSize: 64 * 1024, onError: (ctx) => ctx.json({ error: 'Request too large' }, 413) })(c, next)
@@ -188,44 +195,43 @@ app.post('/api/auth/request', async (c) => {
   const body = await json(c)
   const email = text(body.email, 'email', 200, true).toLowerCase()
   if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address')
-  if (rateLimited(`req-ip:${clientIp(c)}`, 20, 15 * 60_000) || rateLimited(`req-email:${email}`, 5, 15 * 60_000)) {
+  if ((await rateLimited(`req-ip:${clientIp(c)}`, 20, 15 * 60_000)) || (await rateLimited(`req-email:${email}`, 5, 15 * 60_000))) {
     throw new HttpError(429, 'Too many attempts. Try again in a few minutes.')
   }
-  const link = requestLogin(email)
+  const link = await requestLogin(email)
   // The response is identical whether or not the address is known. The link is only echoed in local dev.
   const devLink = link && !config.isProd && config.emailProvider === 'console' ? link : undefined
   return c.json({ ok: true, devLink })
 })
 
 app.post('/api/auth/verify', async (c) => {
-  if (rateLimited(`verify-ip:${clientIp(c)}`, 30, 15 * 60_000)) throw new HttpError(429, 'Too many attempts. Try again in a few minutes.')
+  if (await rateLimited(`verify-ip:${clientIp(c)}`, 30, 15 * 60_000)) throw new HttpError(429, 'Too many attempts. Try again in a few minutes.')
   const body = await json(c)
-  const user = verifyLogin(c, text(body.token, 'token', 200, true))
+  const user = await verifyLogin(c, text(body.token, 'token', 200, true))
   if (!user) throw new HttpError(400, 'This sign-in link is invalid or has expired. Request a new one.')
   return c.json({ user })
 })
 
-app.post('/api/auth/logout', (c) => {
-  logout(c)
+app.post('/api/auth/logout', async (c) => {
+  await logout(c)
   return c.json({ ok: true })
 })
 
 // ---------- reports ----------
 
-app.get('/api/reports', (c) => {
+app.get('/api/reports', async (c) => {
   const user = requireUser(c)
   // Reports with no video yet are unfinished drafts and stay hidden.
   const rows = user.role === 'admin'
-    ? all<ReportRow>(`${REPORT_SELECT} WHERE r.video_path IS NOT NULL ORDER BY r.seq DESC`)
-    : all<ReportRow>(`${REPORT_SELECT} WHERE r.video_path IS NOT NULL AND r.client_id = ? ORDER BY r.seq DESC`, user.clientId)
-  const hist = historyFor(rows.map((r) => r.id))
+    ? await all<ReportRow>(`${REPORT_SELECT} WHERE r.video_path IS NOT NULL ORDER BY r.seq DESC`)
+    : await all<ReportRow>(`${REPORT_SELECT} WHERE r.video_path IS NOT NULL AND r.client_id = $1 ORDER BY r.seq DESC`, user.clientId)
+  const hist = await historyFor(rows.map((r) => r.id))
   return c.json({ reports: rows.map((r) => serialize(r, user, hist.get(r.id) ?? [])) })
 })
 
-app.get('/api/reports/:id', (c) => {
+app.get('/api/reports/:id', async (c) => {
   const user = requireUser(c)
-  const r = loadReport(user, c.req.param('id'))
-  return c.json({ report: serialize(r, user, historyFor([r.id]).get(r.id) ?? []) })
+  return c.json({ report: await withHistory(await loadReport(user, c.req.param('id')), user) })
 })
 
 app.post('/api/reports', async (c) => {
@@ -235,84 +241,140 @@ app.post('/api/reports', async (c) => {
   const description = text(body.description, 'description', 4000)
   const pageUrl = text(body.pageUrl, 'pageUrl', 500)
   const severity = oneOf(body.severity ?? 'Medium', SEVERITIES, 'severity')
+  const storage = getStorage()
 
-  const id = tx(() => {
-    const seq = (one<{ n: number }>('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM reports')?.n ?? 1)
-    const rid = `BUG-${String(seq).padStart(4, '0')}`
-    run(
-      'INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      rid, seq, now(), user.clientId, user.id, title, description, pageUrl, severity,
-    )
-    return rid
-  })
-  const r = loadReport(user, id)
-  return c.json({ report: serialize(r, user, []) }, 201)
+  // Numbers are sequential (BUG-0001...). Two requests can pick the same next number; the unique
+  // constraint rejects the loser, which simply retries.
+  let id: string | undefined
+  for (let attempt = 0; attempt < 6 && !id; attempt++) {
+    try {
+      const row = await one<{ id: string }>(
+        `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity)
+         SELECT 'BUG-' || LPAD(n::text, 4, '0'), n, $1, $2, $3, $4, $5, $6, $7
+           FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM reports) s
+         RETURNING id`,
+        now(), user.clientId, user.id, title, description, pageUrl, severity,
+      )
+      id = row?.id
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e
+    }
+  }
+  if (!id) throw new HttpError(409, 'Could not create the report, please try again')
+  return c.json({ report: await withHistory(await loadReport(user, id), user), upload: { mode: storage.mode } }, 201)
 })
+
+/** Marks a draft as submitted. One atomic statement, so a report can only be finalized once. */
+async function finalizeUpload(user: AuthUser, r: ReportRow, storedPath: string, mime: string, size: number) {
+  const done = await one(
+    `WITH u AS (
+       UPDATE reports SET video_path = $2, video_mime = $3, video_size = $4
+        WHERE id = $1 AND video_path IS NULL RETURNING id)
+     INSERT INTO history (report_id, at, by, kind, text)
+     SELECT id, $5, 'client', 'created', 'Report submitted' FROM u RETURNING report_id`,
+    r.id, storedPath, mime, size, now(),
+  )
+  if (!done) throw new HttpError(409, 'This report already has a video')
+
+  await mailAdmins(`New ${r.severity} report from ${r.client_name}: ${r.title}`, [`${r.reporter_name} (${r.client_name}) submitted ${r.id}.`, `Severity: ${r.severity}`, r.description], r.id)
+  await mailClient(r, `We received your report ${r.id}`, [`Thanks, we received "${r.title}" and will update you here and by email.`])
+  return withHistory(await loadReport(user, r.id), user)
+}
+
+async function ownDraft(c: Context<Env>) {
+  const user = requireClient(c)
+  const r = await loadReport(user, c.req.param('id')!)
+  if (r.reporter_id !== user.id) throw new HttpError(403, 'Only the reporter can upload the video')
+  if (r.video_path !== null) throw new HttpError(409, 'This report already has a video')
+  return { user, r }
+}
 
 const uploading = new Set<string>()
 
+// Local-disk mode: the API receives the bytes. (On Vercel the browser uploads straight to Blob instead.)
 app.put('/api/reports/:id/video', async (c) => {
-  const user = requireClient(c)
-  const r = loadReport(user, c.req.param('id'))
-  if (r.reporter_id !== user.id) throw new HttpError(403, 'Only the reporter can upload the video')
-  if (r.video_path !== null) throw new HttpError(409, 'This report already has a video')
+  const storage = getStorage()
+  if (storage.mode !== 'server' || !storage.save) throw new HttpError(404, 'Direct upload is not used here')
+  const { user, r } = await ownDraft(c)
 
   const mime = normalizeMime(c.req.header('content-type'))
   if (!isAllowedMime(mime)) throw new HttpError(415, 'Unsupported video type. Use WebM, MP4 or MOV.')
   const declared = Number(c.req.header('content-length') ?? 0)
-  if (declared > config.maxVideoBytes) throw new HttpError(413, `Video is larger than ${Math.round(config.maxVideoBytes / 1024 / 1024)} MB`)
+  if (declared > config.maxVideoBytes) throw new HttpError(413, `Video is larger than ${maxMb()} MB`)
   if (!c.req.raw.body) throw new HttpError(400, 'Empty upload')
   if (uploading.has(r.id)) throw new HttpError(409, 'An upload for this report is already in progress')
 
   uploading.add(r.id)
-  let saved: { file: string; size: number }
+  let saved: { path: string; size: number }
   try {
-    saved = await saveVideo(r.id, mime, c.req.raw.body)
+    saved = await storage.save(r.id, mime, c.req.raw.body)
   } catch (e) {
-    if (e instanceof TooLargeError) throw new HttpError(413, `Video is larger than ${Math.round(config.maxVideoBytes / 1024 / 1024)} MB`)
+    if (e instanceof TooLargeError) throw new HttpError(413, `Video is larger than ${maxMb()} MB`)
     throw new HttpError(400, 'Upload failed or was empty')
   } finally {
     uploading.delete(r.id)
   }
-
-  tx(() => {
-    run('UPDATE reports SET video_path = ?, video_mime = ?, video_size = ? WHERE id = ?', saved.file, mime, saved.size, r.id)
-    addHistory(r.id, 'client', 'created', 'Report submitted')
-  })
-
-  mailAdmins(`New ${r.severity} report from ${r.client_name}: ${r.title}`, [`${r.reporter_name} (${r.client_name}) submitted ${r.id}.`, `Severity: ${r.severity}`, r.description], r.id)
-  mailClient(r, `We received your report ${r.id}`, [`Thanks, we received "${r.title}" and will update you here and by email.`])
-
-  const fresh = loadReport(user, r.id)
-  return c.json({ report: serialize(fresh, user, historyFor([r.id]).get(r.id) ?? []) })
+  return c.json({ report: await finalizeUpload(user, r, saved.path, mime, saved.size) })
 })
 
-app.get('/api/reports/:id/video', (c) => {
+// Blob mode, step 1: the browser asks for a token that lets it upload one video into this report's folder.
+app.post('/api/reports/:id/blob-token', async (c) => {
+  const storage = getStorage()
+  if (storage.mode !== 'blob' || !storage.clientUpload) throw new HttpError(404, 'Blob upload is not enabled')
+  const { r } = await ownDraft(c)
+  const body = await json(c)
+  try {
+    return c.json(await storage.clientUpload(c.req.raw, body, r.id))
+  } catch (e) {
+    console.error('blob token refused:', e instanceof Error ? e.message : e)
+    throw new HttpError(400, 'Upload was not allowed')
+  }
+})
+
+// Blob mode, step 2: the browser says it is done. We verify the blob ourselves before accepting it.
+app.post('/api/reports/:id/video/complete', async (c) => {
+  const storage = getStorage()
+  if (storage.mode !== 'blob' || !storage.inspect) throw new HttpError(404, 'Blob upload is not enabled')
+  const { user, r } = await ownDraft(c)
+  const pathname = text((await json(c)).pathname, 'pathname', 300, true)
+  const ext = pathname.split('.').pop() ?? ''
+  if (!pathname.startsWith(blobPrefix(r.id)) || pathname.includes('..') || !pathname.split('/').pop()) throw new HttpError(400, 'That upload does not belong to this report')
+  const found = await storage.inspect(pathname)
+  if (!found) throw new HttpError(400, 'The video was not found. Please upload it again.')
+  if (!isAllowedMime(found.mime) || !extFor(found.mime) || !ext) throw new HttpError(415, 'Unsupported video type. Use WebM, MP4 or MOV.')
+  if (found.size > config.maxVideoBytes) throw new HttpError(413, `Video is larger than ${maxMb()} MB`)
+  if (found.size === 0) throw new HttpError(400, 'The uploaded video is empty')
+  return c.json({ report: await finalizeUpload(user, r, pathname, found.mime, found.size) })
+})
+
+app.get('/api/reports/:id/video', async (c) => {
   const user = requireUser(c)
-  const r = loadReport(user, c.req.param('id'))
-  const v = one<{ video_path: string | null; video_mime: string | null }>('SELECT video_path, video_mime FROM reports WHERE id = ?', r.id)
-  if (!v?.video_path || !v.video_mime) throw new HttpError(404, 'No video for this report')
-  return serveVideo(v.video_path, v.video_mime, c.req.header('range'))
+  const r = await loadReport(user, c.req.param('id'))
+  if (!r.video_path || !r.video_mime) throw new HttpError(404, 'No video for this report')
+  const res = await getStorage().serve(r.video_path, r.video_mime, c.req.header('range'))
+  // A redirect carries a signed link. Make sure no shared cache ever keeps it.
+  if (res.status >= 300 && res.status < 400) res.headers.set('Cache-Control', 'private, no-store')
+  return res
 })
 
 // A client can discard a draft whose upload failed.
-app.delete('/api/reports/:id', (c) => {
+app.delete('/api/reports/:id', async (c) => {
   const user = requireClient(c)
-  const r = loadReport(user, c.req.param('id'))
+  const r = await loadReport(user, c.req.param('id'))
   if (r.reporter_id !== user.id) throw new HttpError(403, 'Not your report')
   if (r.video_path !== null) throw new HttpError(409, 'Submitted reports cannot be deleted')
-  run('DELETE FROM reports WHERE id = ?', r.id)
+  await run('DELETE FROM reports WHERE id = $1', r.id)
   return c.json({ ok: true })
 })
 
 app.patch('/api/reports/:id', async (c) => {
   const admin = requireAdmin(c)
-  const r = loadReport(admin, c.req.param('id'))
+  const r = await loadReport(admin, c.req.param('id'))
   const body = await json(c)
 
   const sets: string[] = []
   const vals: (string | null)[] = []
-  const set = (col: string, v: string | null) => { sets.push(`${col} = ?`); vals.push(v) }
+  const set = (col: string, v: string | null) => { vals.push(v); sets.push(`${col} = $${vals.length}`) }
 
   if ('title' in body) set('title', text(body.title, 'title', 120, true))
   if ('description' in body) set('description', text(body.description, 'description', 4000))
@@ -331,60 +393,64 @@ app.patch('/api/reports/:id', async (c) => {
   }
 
   if (sets.length) {
-    tx(() => {
-      run(`UPDATE reports SET ${sets.join(', ')} WHERE id = ?`, ...vals, r.id)
-      if (newStatus) addHistory(r.id, 'admin', 'status', `Status changed from ${r.status} to ${newStatus}`)
-    })
+    const update: [string, (string | null)[]] = [`UPDATE reports SET ${sets.join(', ')} WHERE id = $${vals.length + 1}`, [...vals, r.id]]
+    if (newStatus) {
+      await batch([
+        update,
+        ['INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', [r.id, now(), 'admin', 'status', `Status changed from ${r.status} to ${newStatus}`]],
+      ])
+    } else {
+      await run(update[0], ...update[1])
+    }
   }
   if (newStatus) {
-    mailClient(r, `${r.id} is now "${newStatus}"`, [`The status of "${r.title}" changed from ${r.status} to ${newStatus}.`])
+    await mailClient(r, `${r.id} is now "${newStatus}"`, [`The status of "${r.title}" changed from ${r.status} to ${newStatus}.`])
   }
-  const fresh = loadReport(admin, r.id)
-  return c.json({ report: serialize(fresh, admin, historyFor([r.id]).get(r.id) ?? []) })
+  return c.json({ report: await withHistory(await loadReport(admin, r.id), admin) })
 })
 
 app.post('/api/reports/:id/replies', async (c) => {
   const admin = requireAdmin(c)
-  const r = loadReport(admin, c.req.param('id'))
+  const r = await loadReport(admin, c.req.param('id'))
   const msg = text((await json(c)).text, 'text', 4000, true)
-  addHistory(r.id, 'admin', 'reply', msg)
-  mailClient(r, `New reply on ${r.id}`, [`Reply about "${r.title}":`, msg])
-  return c.json({ report: serialize(r, admin, historyFor([r.id]).get(r.id) ?? []) })
+  await addHistory(r.id, 'admin', 'reply', msg)
+  await mailClient(r, `New reply on ${r.id}`, [`Reply about "${r.title}":`, msg])
+  return c.json({ report: await withHistory(r, admin) })
 })
 
 app.post('/api/reports/:id/comments', async (c) => {
   const user = requireClient(c)
-  const r = loadReport(user, c.req.param('id'))
+  const r = await loadReport(user, c.req.param('id'))
   const msg = text((await json(c)).text, 'text', 4000, true)
-  addHistory(r.id, 'client', 'comment', msg)
-  mailAdmins(`New comment on ${r.id} from ${r.client_name}`, [`${user.name} commented on "${r.title}":`, msg], r.id)
-  return c.json({ report: serialize(r, user, historyFor([r.id]).get(r.id) ?? []) })
+  await addHistory(r.id, 'client', 'comment', msg)
+  await mailAdmins(`New comment on ${r.id} from ${r.client_name}`, [`${user.name} commented on "${r.title}":`, msg], r.id)
+  return c.json({ report: await withHistory(r, user) })
 })
 
 app.post('/api/reports/:id/confirm', async (c) => {
   const user = requireClient(c)
-  const r = loadReport(user, c.req.param('id'))
+  const r = await loadReport(user, c.req.param('id'))
   if (r.status !== 'Ready to verify') throw new HttpError(409, 'This report is not waiting for your confirmation')
   const body = await json(c)
   const fixed = body.fixed === true
   const note = text(body.note, 'note', 2000)
   const msg = fixed ? 'Client confirmed the fix' : `Client says it is still broken${note ? `: ${note}` : ''}`
-  tx(() => {
-    addHistory(r.id, 'client', 'confirm', msg)
-    if (fixed) run("UPDATE reports SET status = 'Resolved', resolved_at = ? WHERE id = ?", now(), r.id)
-    else run("UPDATE reports SET status = 'In progress', resolved_at = NULL WHERE id = ?", r.id)
-  })
-  mailAdmins(fixed ? `${r.id} confirmed fixed by ${r.client_name}` : `${r.id} is still broken (${r.client_name})`, [msg], r.id)
-  const fresh = loadReport(user, r.id)
-  return c.json({ report: serialize(fresh, user, historyFor([r.id]).get(r.id) ?? []) })
+  await batch([
+    ['INSERT INTO history (report_id, at, by, kind, text) VALUES ($1, $2, $3, $4, $5)', [r.id, now(), 'client', 'confirm', msg]],
+    fixed
+      ? ["UPDATE reports SET status = 'Resolved', resolved_at = $1 WHERE id = $2", [now(), r.id]]
+      : ["UPDATE reports SET status = 'In progress', resolved_at = NULL WHERE id = $1", [r.id]],
+  ])
+  await mailAdmins(fixed ? `${r.id} confirmed fixed by ${r.client_name}` : `${r.id} is still broken (${r.client_name})`, [msg], r.id)
+  return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
 })
 
 // ---------- admin: clients and their users ----------
 
-app.get('/api/admin/clients', (c) => {
+app.get('/api/admin/clients', async (c) => {
   requireAdmin(c)
-  const clients = all<{ id: string; name: string; created_at: string }>('SELECT id, name, created_at FROM clients ORDER BY name')
-  const users = all<{ id: string; email: string; name: string; client_id: string }>("SELECT id, email, name, client_id FROM users WHERE role = 'client' ORDER BY name")
+  const clients = await all<{ id: string; name: string; created_at: string }>('SELECT id, name, created_at FROM clients ORDER BY name')
+  const users = await all<{ id: string; email: string; name: string; client_id: string }>("SELECT id, email, name, client_id FROM users WHERE role = 'client' ORDER BY name")
   return c.json({
     clients: clients.map((cl) => ({ id: cl.id, name: cl.name, createdAt: cl.created_at, users: users.filter((u) => u.client_id === cl.id).map(({ id, email, name }) => ({ id, email, name })) })),
   })
@@ -394,22 +460,22 @@ app.post('/api/admin/clients', async (c) => {
   requireAdmin(c)
   const name = text((await json(c)).name, 'name', 100, true)
   const id = crypto.randomUUID()
-  run('INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)', id, name, now())
+  await run('INSERT INTO clients (id, name, created_at) VALUES ($1, $2, $3)', id, name, now())
   return c.json({ client: { id, name, users: [] } }, 201)
 })
 
 app.post('/api/admin/clients/:id/users', async (c) => {
   requireAdmin(c)
-  const client = one<{ id: string; name: string }>('SELECT id, name FROM clients WHERE id = ?', c.req.param('id'))
+  const client = await one<{ id: string; name: string }>('SELECT id, name FROM clients WHERE id = $1', c.req.param('id'))
   if (!client) throw new HttpError(404, 'Client not found')
   const body = await json(c)
   const email = text(body.email, 'email', 200, true).toLowerCase()
   const name = text(body.name, 'name', 100, true)
   if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address')
-  if (one('SELECT id FROM users WHERE email = ?', email)) throw new HttpError(409, 'A user with this email already exists')
+  if (await one('SELECT id FROM users WHERE email = $1', email)) throw new HttpError(409, 'A user with this email already exists')
   const id = crypto.randomUUID()
-  run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES (?, ?, ?, 'client', ?, ?)", id, email, name, client.id, now())
-  sendQuietly({
+  await run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES ($1, $2, $3, 'client', $4, $5)", id, email, name, client.id, now())
+  await sendQuietly({
     to: email,
     subject: `You have been invited to report issues for ${client.name}`,
     text: `Hi ${name},\n\nYou can now send us bug and UAT reports as short videos.\nSign in with your email (no password needed): ${config.appUrl}`,
@@ -418,11 +484,32 @@ app.post('/api/admin/clients/:id/users', async (c) => {
   return c.json({ user: { id, email, name } }, 201)
 })
 
+// ---------- scheduled housekeeping (Vercel Cron) ----------
+
+export async function housekeeping() {
+  const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString()
+  await run('DELETE FROM reports WHERE video_path IS NULL AND created_at < $1', cutoff)
+  await run('DELETE FROM login_tokens WHERE expires_at < $1', now())
+  await run('DELETE FROM sessions WHERE expires_at < $1', now())
+  await run('DELETE FROM rate_hits WHERE at < $1', new Date(Date.now() - 3600_000).toISOString())
+}
+
+app.get('/api/cron/housekeeping', async (c) => {
+  // Vercel Cron sends "Authorization: Bearer $CRON_SECRET". Without a secret the endpoint is off.
+  const auth = c.req.header('authorization') ?? ''
+  const expected = `Bearer ${config.cronSecret}`
+  const ok = !!config.cronSecret && auth.length === expected.length && crypto.timingSafeEqual(Buffer.from(auth), Buffer.from(expected))
+  if (!ok) return c.json({ error: 'Not found' }, 404)
+  await housekeeping()
+  return c.json({ ok: true })
+})
+
 app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404))
 
-// ---------- production: serve the built frontend ----------
+// ---------- self-hosted production: serve the built frontend ----------
+// On Vercel the static files are served by Vercel itself, so this only applies to plain Node hosting.
 
-if (config.isProd) {
+if (config.isProd && !config.onVercel) {
   app.use('/*', serveStatic({ root: './dist' }))
   app.get('*', serveStatic({ path: './dist/index.html' }))
 }

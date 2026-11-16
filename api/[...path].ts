@@ -1,0 +1,12 @@
+import { app } from '../server/app.js'
+
+// Vercel entry point. One function serves every /api/* route.
+const handler = (request: Request) => app.fetch(request)
+
+export const GET = handler
+export const POST = handler
+export const PUT = handler
+export const PATCH = handler
+export const DELETE = handler
+export const HEAD = handler
+export const OPTIONS = handler

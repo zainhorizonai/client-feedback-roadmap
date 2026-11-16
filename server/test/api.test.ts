@@ -8,12 +8,18 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'fp-test-'))
 process.env.ADMIN_EMAILS = 'admin@test.com'
 process.env.EMAIL_PROVIDER = 'console'
 process.env.MAX_VIDEO_MB = '1'
+process.env.DB_IN_MEMORY = '1'
+process.env.CRON_SECRET = 'test-cron-secret'
+delete process.env.DATABASE_URL
+delete process.env.BLOB_READ_WRITE_TOKEN
 process.env.APP_URL = 'http://localhost:5173'
 delete process.env.NODE_ENV
 
-const { app } = await import('../app')
-const { ensureAdmins } = await import('../auth')
-ensureAdmins()
+const { app } = await import('../app.js')
+const { ensureAdmins } = await import('../auth.js')
+const { setStorageForTests, getStorage } = await import('../storage.js')
+const { all, run } = await import('../db.js')
+await ensureAdmins()
 
 type Json = Record<string, any>
 class Client {
@@ -189,5 +195,137 @@ describe('portal API', () => {
   it('logs out', async () => {
     assert.equal((await jane.json('POST', '/api/auth/logout')).status, 200)
     assert.equal((await jane.json('GET', '/api/reports')).status, 401)
+  })
+})
+
+// ---------- Vercel Blob mode, with a fake driver standing in for the Blob service ----------
+
+describe('Blob upload mode', () => {
+  const admin = new Client()
+  const jane = new Client()
+  const sam = new Client()
+  const store = new Map<string, { size: number; mime: string }>()
+  const issued: { reportId: string; body: unknown }[] = []
+  let original: ReturnType<typeof getStorage>
+  let id = ''
+
+  before(async () => {
+    original = getStorage()
+    setStorageForTests({
+      mode: 'blob',
+      async clientUpload(_req, body, reportId) {
+        issued.push({ reportId, body })
+        return { type: 'blob.generate-client-token', clientToken: 'fake-token' }
+      },
+      async inspect(pathname) { return store.get(pathname) ?? null },
+      async serve(pathname) {
+        return new Response(null, { status: 302, headers: { Location: `https://blob.test/signed/${pathname}?sig=abc` } })
+      },
+    })
+    await admin.signIn('admin@test.com')
+    const clients = (await admin.json('GET', '/api/admin/clients')).data.clients as Json[]
+    assert.ok(clients.length >= 2)
+    await jane.signIn('jane@acme.com')
+    await sam.signIn('sam@globex.com')
+    const created = await jane.json('POST', '/api/reports', { title: 'Blob report' })
+    assert.equal(created.data.upload.mode, 'blob')
+    id = created.data.report.id
+  })
+
+  it('tells the browser to upload directly and refuses the server-upload route', async () => {
+    assert.equal((await upload(jane, id)).status, 404)
+  })
+
+  it('issues upload tokens only to the owner of an unfinished report', async () => {
+    const body = { type: 'blob.generate-client-token', payload: { pathname: `reports/${id}/video.webm` } }
+    assert.equal((await new Client().json('POST', `/api/reports/${id}/blob-token`, body)).status, 401)
+    assert.equal((await sam.json('POST', `/api/reports/${id}/blob-token`, body)).status, 404)
+    assert.equal((await admin.json('POST', `/api/reports/${id}/blob-token`, body)).status, 403)
+    const ok = await jane.json('POST', `/api/reports/${id}/blob-token`, body)
+    assert.equal(ok.status, 200)
+    assert.equal(ok.data.clientToken, 'fake-token')
+    assert.equal(issued.at(-1)?.reportId, id)
+  })
+
+  it('refuses to complete an upload that does not exist or belongs elsewhere', async () => {
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: `reports/${id}/missing.webm` })).status, 400)
+    store.set('reports/BUG-9999/video.webm', { size: 100, mime: 'video/webm' })
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: 'reports/BUG-9999/video.webm' })).status, 400)
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: `reports/${id}/../BUG-9999/video.webm` })).status, 400)
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, {})).status, 400)
+  })
+
+  it('rejects wrong types and oversized files', async () => {
+    store.set(`reports/${id}/a.webm`, { size: 100, mime: 'text/html' })
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: `reports/${id}/a.webm` })).status, 415)
+    store.set(`reports/${id}/b.webm`, { size: 5 * 1024 * 1024, mime: 'video/webm' })
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: `reports/${id}/b.webm` })).status, 413)
+    store.set(`reports/${id}/c.webm`, { size: 0, mime: 'video/webm' })
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: `reports/${id}/c.webm` })).status, 400)
+  })
+
+  it('completes once, hides drafts until then, and notifies', async () => {
+    assert.equal((await jane.json('GET', '/api/reports')).data.reports.filter((r: Json) => r.id === id).length, 0)
+    const path = `reports/${id}/video-xyz.webm`
+    store.set(path, { size: 4096, mime: 'video/webm' })
+    const done = await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: path })
+    assert.equal(done.status, 200)
+    assert.equal(done.data.report.hasVideo, true)
+    assert.equal(done.data.report.history[0].text, 'Report submitted')
+    assert.equal((await jane.json('POST', `/api/reports/${id}/video/complete`, { pathname: path })).status, 409)
+    assert.equal((await admin.json('GET', '/api/reports')).data.reports.some((r: Json) => r.id === id), true)
+  })
+
+  it('redirects playback to a signed link, only for people allowed to see the report', async () => {
+    const res = await jane.req('GET', `/api/reports/${id}/video`)
+    assert.equal(res.status, 302)
+    assert.match(res.headers.get('location') ?? '', /^https:\/\/blob\.test\/signed\/reports\//)
+    assert.equal(res.headers.get('cache-control'), 'private, no-store')
+    assert.equal((await admin.req('GET', `/api/reports/${id}/video`)).status, 302)
+    assert.equal((await sam.req('GET', `/api/reports/${id}/video`)).status, 404)
+    assert.equal((await new Client().req('GET', `/api/reports/${id}/video`)).status, 401)
+  })
+
+  it('restores the local driver afterwards', () => {
+    setStorageForTests(original)
+    assert.equal(getStorage().mode, 'server')
+  })
+})
+
+describe('housekeeping and limits', () => {
+  it('runs the cron job only with the secret', async () => {
+    const c = new Client()
+    assert.equal((await c.req('GET', '/api/cron/housekeeping')).status, 404)
+    assert.equal((await c.req('GET', '/api/cron/housekeeping', undefined, { authorization: 'Bearer wrong' })).status, 404)
+    assert.equal((await c.req('GET', '/api/cron/housekeeping', undefined, { authorization: 'Bearer test-cron-secret' })).status, 200)
+  })
+
+  it('removes stale drafts but keeps submitted reports', async () => {
+    const jane = new Client()
+    await jane.signIn('jane@acme.com')
+    const draft = (await jane.json('POST', '/api/reports', { title: 'abandoned' })).data.report.id
+    await run("UPDATE reports SET created_at = '2020-01-01T00:00:00.000Z' WHERE id = $1", draft)
+    const before = (await all('SELECT id FROM reports')).length
+    await new Client().req('GET', '/api/cron/housekeeping', undefined, { authorization: 'Bearer test-cron-secret' })
+    const after = await all<{ id: string }>('SELECT id FROM reports')
+    assert.equal(after.length, before - 1)
+    assert.equal(after.some((r) => r.id === draft), false)
+  })
+
+  it('rate limits sign-in requests per email across requests', async () => {
+    const c = new Client()
+    const statuses: number[] = []
+    for (let i = 0; i < 7; i++) statuses.push((await c.json('POST', '/api/auth/request', { email: 'sam@globex.com' })).status)
+    assert.equal(statuses[0], 200)
+    assert.equal(statuses.at(-1), 429)
+  })
+
+  it('numbers reports sequentially even when created at the same time', async () => {
+    const c = new Client()
+    await c.signIn('jane@acme.com')
+    const made = await Promise.all(Array.from({ length: 5 }, (_, i) => c.json('POST', '/api/reports', { title: `parallel ${i}` })))
+    const ids = made.map((m) => m.data.report?.id)
+    assert.ok(ids.every(Boolean), JSON.stringify(made.map((m) => m.data)))
+    assert.equal(new Set(ids).size, 5)
   })
 })

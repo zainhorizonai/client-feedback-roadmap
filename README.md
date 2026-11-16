@@ -2,7 +2,31 @@
 
 Clients record a video of a bug or UAT issue. Each video becomes a row in a spreadsheet-style tracker that you work through until it is resolved. Clients and admins both get emails as things change.
 
-React + Vite frontend, Hono API, SQLite database, videos on local disk.
+React + Vite frontend, Hono API on Vercel Functions, Postgres (Neon), videos in Vercel Blob (private).
+
+## Deploy to Vercel
+
+1. **Push this repo to GitHub** and import it in Vercel (**Add New > Project**). The framework is detected as Vite. `vercel.json` already sets the build, routing and the nightly cron.
+2. **Add a database.** In the project: **Storage > Create > Neon (Postgres)**. This adds `DATABASE_URL` automatically. Tables are created on first request, there is nothing to run.
+3. **Add file storage.** **Storage > Create > Blob**, and choose **Private** access. This adds `BLOB_READ_WRITE_TOKEN` automatically.
+4. **Set email.** Create a [Resend](https://resend.com) account, verify your sending domain, then add these environment variables:
+   - `EMAIL_PROVIDER` = `resend`
+   - `RESEND_API_KEY` = your key
+   - `EMAIL_FROM` = `Feedback Portal <portal@yourdomain.com>`
+
+   Without this, sign-in links are only logged and nobody can sign in.
+5. **Set the rest** (Project Settings > Environment Variables):
+   - `ADMIN_EMAILS` = your email (comma-separate more). These people become admins the first time they sign in.
+   - `CRON_SECRET` = any long random string. Enables the nightly cleanup of abandoned drafts and expired sign-in data.
+   - `APP_URL` = optional. Defaults to the deployment URL. Set it to your custom domain once you add one.
+6. **Redeploy** so the new variables apply, open the site, and sign in with your admin email.
+7. In the app: **Clients** > add a client > invite their lead.
+
+Optional: set `MAX_VIDEO_MB` (default 500).
+
+## How uploads work on Vercel
+
+Videos never pass through a function (which caps request size). The browser asks the API for a short-lived upload token, uploads directly to Blob, then tells the API it is done. The API checks the blob exists, is a video, and is the right size before accepting it. Playback sends the browser to a signed link that expires in 5 minutes, so videos stay private and seeking works.
 
 ## Run it locally
 
@@ -12,30 +36,9 @@ cp .env.example .env      # then set ADMIN_EMAILS to your email
 npm run dev               # web on :5173, API on :8787
 ```
 
-Open http://localhost:5173 and sign in with your admin email. In local dev (`EMAIL_PROVIDER=console`) emails are printed in the terminal, and the sign-in page shows an "Open sign-in link" button so you do not need a mailbox.
+No accounts needed locally. With `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` empty, an embedded Postgres (PGlite, stored in `./data/pgdata`) and local-disk video storage are used. It is the same SQL as production. Emails print in the terminal, and the sign-in page shows an "Open sign-in link" button.
 
-Then, as admin: **Clients** > add a client > invite their lead. Sign in as that person in a private window to try the client side.
-
-`npm run seed` adds two demo clients with a few reports (no videos) if you want sample data.
-
-## Production
-
-```bash
-npm run build
-NODE_ENV=production npm start     # one server: serves the site and the API
-```
-
-Set these in `.env` (see `.env.example`):
-
-| Variable | Notes |
-| --- | --- |
-| `APP_URL` | Public https URL. Used in email links and for cross-origin checks. |
-| `ADMIN_EMAILS` | Comma-separated. These people get admin access. |
-| `EMAIL_PROVIDER` | `resend` to send real emails (needs `RESEND_API_KEY`, `EMAIL_FROM` on a verified domain). `console` only logs. |
-| `DATA_DIR` | Holds `portal.db` and `videos/`. **Back this folder up.** |
-| `MAX_VIDEO_MB` | Upload limit, default 500. |
-
-Run it behind HTTPS (Caddy, nginx or your host's proxy). Cookies are marked `Secure` when `APP_URL` is https. If your proxy buffers request bodies, raise its upload limit to match `MAX_VIDEO_MB`.
+`npm run seed` adds two demo clients with a few reports (no videos).
 
 ## Tests
 
@@ -43,18 +46,17 @@ Run it behind HTTPS (Caddy, nginx or your host's proxy). Cookies are marked `Sec
 npm test
 ```
 
-Runs the API against a temporary database. Covers sign-in, one-time links, client isolation, hidden internal notes, video upload and seeking, validation and the status workflow.
+27 API tests against an in-memory Postgres: sign-in, one-time links, client isolation, hidden internal notes, upload and seeking, the Blob upload flow (with a fake Blob service), validation, the status workflow, rate limiting, concurrent report numbering and the cleanup job.
 
-## How it fits together
+## Layout
 
-- `server/app.ts` all API routes. `server/auth.ts` magic links and sessions. `server/storage.ts` video files. `server/email.ts` email sending. `server/db.ts` schema.
+- `api/[...path].ts` Vercel entry point. `server/app.ts` all routes. `server/auth.ts` sessions and magic links. `server/db.ts` Postgres (Neon or PGlite). `server/storage.ts` Blob and local-disk drivers. `server/email.ts` email.
 - `src/lib/store.ts` and `src/lib/api.ts` are the frontend's only contact with the API.
-
-Swappable parts: replace `server/storage.ts` to use S3 or R2, and `server/email.ts` to use another mail provider. Routes and screens do not change.
 
 ## Known limits
 
-- Single server. Rate limiting and the upload lock are in memory. Add Redis if you run several instances.
-- `node:sqlite` is built into Node 22 but still marked experimental. It works, and it prints a one-line warning on start.
-- Browser-recorded WebM files usually have no duration or seek index, so scrubbing in the player can be limited. Re-encoding on upload (for example with ffmpeg) would fix it.
-- No video deletion or retention job yet. Unfinished drafts older than a day are cleaned up automatically.
+- **Not yet tested on a live Vercel deployment.** Everything is tested locally, and the Blob and Neon calls follow their documented APIs, but the first deploy is the first real run against those services. If something fails, check the function logs in Vercel first.
+- Browser-recorded WebM files usually have no duration or seek index, so scrubbing can be limited. Re-encoding on upload (for example with ffmpeg) would fix it.
+- A video uploaded to Blob but never confirmed (browser closed mid-way) stays in storage. They are small in number but not cleaned up yet.
+- No video deletion or retention policy yet.
+- Email is sent during the request, which adds a few hundred milliseconds to actions that send mail.
