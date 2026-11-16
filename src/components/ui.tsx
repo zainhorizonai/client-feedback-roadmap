@@ -69,11 +69,14 @@ export const Mono = ({ children, className = '' }: { children: ReactNode; classN
  * A form field: a persistent label tied to the control by id, an optional hint, a required marker and a local error.
  * The control is passed in as the only child and receives the id and the description links.
  */
-export function Field({ label, hint, required, error, children, className = '' }: { label: string; hint?: string; required?: boolean; error?: string; children: ReactElement<Record<string, unknown>>; className?: string }) {
+type FieldProps = { id: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean }
+
+export function Field({ label, hint, required, error, children, className = '' }: { label: string; hint?: string; required?: boolean; error?: string; children: ReactElement<Record<string, unknown>> | ((p: FieldProps) => ReactElement); className?: string }) {
   const id = useId()
   const hintId = `${id}-hint`
   const errId = `${id}-err`
   const describedBy = [hint ? hintId : '', error ? errId : ''].filter(Boolean).join(' ') || undefined
+  const wiring: FieldProps = { id, 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined }
   return (
     <div className={className}>
       <label htmlFor={id} className="mb-1 block font-semibold">
@@ -82,7 +85,8 @@ export function Field({ label, hint, required, error, children, className = '' }
         {required && <span className="sr-only"> (required)</span>}
       </label>
       {hint && <p id={hintId} className="mb-1.5 text-sm text-muted">{hint}</p>}
-      {cloneElement(children, { id, 'aria-describedby': describedBy, 'aria-invalid': error ? true : children.props['aria-invalid'] })}
+      {/* A function child lets a field that wraps its input (a password box with a Show button) put the id on the input itself. */}
+      {typeof children === 'function' ? children(wiring) : cloneElement(children, { ...wiring, 'aria-invalid': wiring['aria-invalid'] ?? children.props['aria-invalid'] })}
       {error && <p id={errId} role="alert" className="mt-1 text-sm font-medium text-[var(--seam-error-fg)]">{error}</p>}
     </div>
   )

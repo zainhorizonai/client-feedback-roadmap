@@ -1,16 +1,17 @@
 import { useMemo } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { LogOut, Plus } from 'lucide-react'
+import { Building2, Plus } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { ClientProjectProvider, useClientProject } from '../lib/clientProject'
 import { useReports, useReportsSync } from '../lib/store'
 import { useRoadmap, useRoadmapSync } from '../lib/roadmap'
 import { buildEntries, countEntries } from '../lib/entries'
+import { ProfileMenu } from './ProfileMenu'
 import { buttonClass } from './ui'
 import { Toasts } from '../lib/toast'
 
 function Header() {
-  const { user, signOut } = useAuth()
+  const { user } = useAuth()
   const { projects, selectedId, select } = useClientProject()
   const reports = useReports()
   const items = useRoadmap()
@@ -25,9 +26,13 @@ function Header() {
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 md:px-8">
         <Link to="/reports" aria-label="SEAM home" className="shrink-0"><img src="/brand/seam-logo.svg" alt="" className="h-9 w-auto" /></Link>
         {projects.length > 1 ? (
-          <select className="input !w-auto !min-h-9 font-semibold" aria-label="Switch project" value={selectedId} onChange={(e) => select(e.target.value)}>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}{pending[p.id]?.pending ? ` (${pending[p.id].pending} pending)` : ''}</option>)}
-          </select>
+          <div className="flex items-center gap-2">
+            <Building2 className="hidden h-4 w-4 text-muted sm:block" aria-hidden="true" />
+            <span className="hidden text-sm text-muted md:inline" aria-hidden="true">Project</span>
+            <select className="input !w-auto !min-h-9 font-semibold" aria-label="Switch project" value={selectedId} onChange={(e) => select(e.target.value)}>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}{pending[p.id]?.pending ? ` (${pending[p.id].pending} pending)` : ''}</option>)}
+            </select>
+          </div>
         ) : (
           <p className="rounded-control bg-canvas px-2.5 py-1 text-sm font-semibold" aria-label="Project">{user?.clientName}</p>
         )}
@@ -39,7 +44,7 @@ function Header() {
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <Link to="/reports/new" className={buttonClass('primary')}><Plus className="h-4 w-4" aria-hidden="true" />New</Link>
-          <button onClick={signOut} aria-label={`Sign out ${user?.name}`} title="Sign out" className="flex h-11 w-11 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink md:h-9 md:w-9"><LogOut className="h-4 w-4" aria-hidden="true" /></button>
+          <ProfileMenu projects={projects} selectedId={selectedId} onSelect={select} pending={Object.fromEntries(projects.map((p) => [p.id, pending[p.id]?.pending ?? 0]))} />
         </div>
       </div>
     </header>

@@ -121,3 +121,11 @@ export const approveReport = (id: string, note = '') =>
 /** Fixed = approve. Still broken sends it back to the team with a note. */
 export const clientConfirm = (id: string, fixed: boolean, note: string) =>
   fixed ? approveReport(id, note) : act(() => api.post(`/api/reports/${id}/confirm`, { fixed: false, note }), 'Thanks. We will take another look.')
+
+/** A client adding to their own ticket after sending it. The team is told. */
+export const updateDetails = (id: string, patch: { title?: string; description?: string; pageUrl?: string }) =>
+  act(() => api.patch(`/api/reports/${id}/details`, patch), 'Saved. The team has been told.')
+
+/** Bring back something that was marked done. It returns to the team's inbox. */
+export const reopenReport = (id: string, note = '') =>
+  act(() => api.post(`/api/reports/${id}/reopen`, { note }), 'Reopened. The team has been told.')

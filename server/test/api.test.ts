@@ -18,7 +18,7 @@ delete process.env.NODE_ENV
 const { app } = await import('../app.js')
 const { ensureAdmins } = await import('../auth.js')
 const { setStorageForTests, getStorage } = await import('../storage.js')
-const { all, run } = await import('../db.js')
+const { all, one, run } = await import('../db.js')
 await ensureAdmins()
 
 type Json = Record<string, any>
@@ -40,14 +40,21 @@ class Client {
     const res = await this.req(method, url, body)
     return { status: res.status, data: (await res.json().catch(() => ({}))) as Json }
   }
+  /** First time for an address: set a password through the emailed link. After that: plain email and password. */
   async signIn(email: string) {
-    const r = await this.json('POST', '/api/auth/request', { email })
-    assert.ok(r.data.devLink, 'expected a dev link')
-    const token = new URL(r.data.devLink).searchParams.get('token')
-    return this.json('POST', '/api/auth/verify', { token })
+    const known = PASSWORDS.get(email)
+    if (known) return this.json('POST', '/api/auth/login', { email, password: known })
+    const f = await this.json('POST', '/api/auth/forgot', { email })
+    assert.ok(f.data.devLink, 'expected a dev link for ' + email)
+    const token = new URL(f.data.devLink).searchParams.get('token')
+    const r = await this.json('POST', '/api/auth/reset', { token, password: TEST_PASSWORD })
+    if (r.status === 200) PASSWORDS.set(email, TEST_PASSWORD)
+    return r
   }
 }
 
+const TEST_PASSWORD = 'correct-horse-battery-9'
+const PASSWORDS = new Map<string, string>()
 const VIDEO = new Uint8Array(Array.from({ length: 5000 }, (_, i) => i % 251))
 const upload = (c: Client, id: string, body: Uint8Array = VIDEO, type = 'video/webm') =>
   c.req('PUT', `/api/reports/${id}/video`, body, { 'content-type': type })
@@ -75,17 +82,14 @@ describe('portal API', () => {
   })
 
   it('does not reveal unknown emails and gives no link', async () => {
-    const r = await new Client().json('POST', '/api/auth/request', { email: 'nobody@nowhere.com' })
+    const r = await new Client().json('POST', '/api/auth/forgot', { email: 'nobody@nowhere.com' })
     assert.equal(r.status, 200)
     assert.equal(r.data.devLink, undefined)
   })
 
-  it('magic links are single use', async () => {
-    const c = new Client()
-    const r = await c.json('POST', '/api/auth/request', { email: 'jane@acme.com' })
-    const token = new URL(r.data.devLink).searchParams.get('token')
-    assert.equal((await c.json('POST', '/api/auth/verify', { token })).status, 200)
-    assert.equal((await new Client().json('POST', '/api/auth/verify', { token })).status, 400)
+  it('has no magic-link sign-in any more', async () => {
+    assert.equal((await new Client().json('POST', '/api/auth/request', { email: 'jane@acme.com' })).status, 404)
+    assert.equal((await new Client().json('POST', '/api/auth/verify', { token: 'x' })).status, 404)
   })
 
   it('clients cannot use admin routes', async () => {
@@ -315,10 +319,10 @@ describe('housekeeping and limits', () => {
     assert.equal(after.some((r) => r.id === draft), false)
   })
 
-  it('rate limits sign-in requests per email across requests', async () => {
+  it('rate limits password-reset emails per address', async () => {
     const c = new Client()
     const statuses: number[] = []
-    for (let i = 0; i < 7; i++) statuses.push((await c.json('POST', '/api/auth/request', { email: 'sam@globex.com' })).status)
+    for (let i = 0; i < 5; i++) statuses.push((await c.json('POST', '/api/auth/forgot', { email: 'sam@globex.com' })).status)
     assert.equal(statuses[0], 200)
     assert.equal(statuses.at(-1), 429)
   })
@@ -467,10 +471,10 @@ describe('email diagnostics', () => {
   })
 })
 
-describe('skipped sign-in requests are visible to the admin', () => {
+describe('skipped password requests are visible to the admin', () => {
   it('notes a request for an unknown address in the setup check, without telling the requester', async () => {
     const c = new Client()
-    const r = await c.json('POST', '/api/auth/request', { email: 'typo-address@x.com' })
+    const r = await c.json('POST', '/api/auth/forgot', { email: 'typo-address@x.com' })
     assert.equal(r.status, 200)
     assert.equal(r.data.devLink, undefined)
     assert.equal(JSON.stringify(r.data).includes('no account'), false)
@@ -842,5 +846,286 @@ describe('older requests reach the roadmap once', () => {
     await run('DELETE FROM roadmap_items WHERE id = $1', item!.id)
     await backfillRoadmapForRequests(driver)
     assert.equal((await all("SELECT l.item_id FROM roadmap_links l WHERE l.report_id = 'REQ-9100'")).length, 0, 'a deleted card stays deleted')
+  })
+})
+
+describe('email and password accounts', () => {
+  const admin = new Client()
+  let acme = ''
+  const mails: Json[] = []
+  /** The newest set-password link sent to an address, read from the captured email like a person would. */
+  const mailToken = (email: string) => {
+    const m = [...mails].reverse().find((x) => x.to.includes(email) && /set-password\?token=/.test(x.text))
+    assert.ok(m, 'expected a password email for ' + email)
+    return /token=([^&\s]+)/.exec(m.text)![1]
+  }
+
+  before(async () => {
+    await run('DELETE FROM rate_hits')
+    await admin.signIn('admin@test.com')
+    const clients = (await admin.json('GET', '/api/admin/clients')).data.clients as Json[]
+    acme = clients.find((c) => c.name === 'Acme')!.id
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    config.emailProvider = 'smtp'
+    config.smtpUser = 'sender@gmail.com'
+    setMailTransportForTests({ sendMail: async (m) => { mails.push(m); return {} } })
+  })
+
+  const invite = async (email: string) => (await admin.json('POST', `/api/admin/clients/${acme}/users`, { email, name: 'New Person' })).data
+
+  it('invites someone with a set-password link, not a sign-in link', async () => {
+    mails.length = 0
+    const r = await invite('newbie@acme.com')
+    assert.equal(r.emailSent, true)
+    const mail = mails.find((m) => m.to.includes('newbie@acme.com'))!
+    assert.equal(mail.subject, 'Set your SEAM password')
+    assert.match(mail.text, /\/auth\/set-password\?token=/)
+    assert.match(mail.text, /invited to Acme/)
+    const row = await one<{ password_hash: string | null }>("SELECT password_hash FROM users WHERE email = 'newbie@acme.com'")
+    assert.equal(row?.password_hash, null, 'no password until they choose one')
+  })
+
+  it('cannot sign in before a password exists, and does not say why', async () => {
+    const c = new Client()
+    const none = await c.json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: 'whatever-password-1' })
+    assert.equal(none.status, 401)
+    assert.equal(none.data.error, 'Email or password is incorrect.')
+    const unknown = await c.json('POST', '/api/auth/login', { email: 'ghost@acme.com', password: 'whatever-password-1' })
+    assert.equal(unknown.status, 401)
+    assert.equal(unknown.data.error, none.data.error, 'the same message for an unknown address')
+    assert.equal(c.cookie, '', 'no session cookie')
+  })
+
+  it('checks a link without using it, then sets the password once and signs in', async () => {
+    const c = new Client()
+    await c.json('POST', '/api/auth/forgot', { email: 'newbie@acme.com' })
+    const token = mailToken('newbie@acme.com')
+    const info = await c.json('POST', '/api/auth/reset/check', { token })
+    assert.equal(info.status, 200)
+    assert.equal(info.data.purpose, 'invite')
+    assert.equal(info.data.email, 'newbie@acme.com')
+    assert.equal((await c.json('POST', '/api/auth/reset/check', { token })).status, 200, 'checking does not spend it')
+
+    assert.equal((await c.json('POST', '/api/auth/reset', { token, password: 'short' })).status, 400)
+    assert.equal((await c.json('POST', '/api/auth/reset', { token, password: 'password1234' })).data.error, 'That password is too common. Choose something harder to guess.')
+    assert.equal((await c.json('POST', '/api/auth/reset', { token, password: 'newbie-is-my-name-1' })).status, 400, 'rejects a password containing the email name')
+    assert.equal((await c.json('POST', '/api/auth/reset', { token, password: 'a-much-better-passphrase' })).status, 200)
+    assert.ok(c.cookie.includes('sid='), 'signed in straight away')
+    assert.equal((await c.json('GET', '/api/me')).data.user.email, 'newbie@acme.com')
+    assert.equal((await new Client().json('POST', '/api/auth/reset', { token, password: 'another-good-passphrase' })).status, 400, 'a link works once')
+    assert.equal((await new Client().json('POST', '/api/auth/reset/check', { token })).status, 400)
+  })
+
+  it('stores only a salted hash, never the password', async () => {
+    const row = await one<{ password_hash: string }>("SELECT password_hash FROM users WHERE email = 'newbie@acme.com'")
+    assert.match(row!.password_hash, /^scrypt\$16384\$8\$1\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/)
+    assert.equal(row!.password_hash.includes('a-much-better-passphrase'), false)
+    const other = await one<{ password_hash: string }>("SELECT password_hash FROM users WHERE email = 'jane@acme.com'")
+    assert.notEqual(row!.password_hash, other!.password_hash)
+  })
+
+  it('signs in with email and password, ignoring email case', async () => {
+    const c = new Client()
+    assert.equal((await c.json('POST', '/api/auth/login', { email: 'NewBie@Acme.com', password: 'a-much-better-passphrase' })).status, 200)
+    assert.equal((await c.json('GET', '/api/reports')).status, 200)
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: 'a-much-better-passphrasE' })).status, 401, 'case-sensitive password')
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'newbie@acme.com' })).status, 400)
+  })
+
+  it('locks sign-in after repeated wrong passwords, even for the right one', async () => {
+    await invite('lockme@acme.com')
+    await new Client().json('POST', '/api/auth/forgot', { email: 'lockme@acme.com' })
+    await new Client().json('POST', '/api/auth/reset', { token: mailToken('lockme@acme.com'), password: 'lock-me-passphrase-1' })
+    const c = new Client()
+    for (let i = 0; i < 8; i++) assert.equal((await c.json('POST', '/api/auth/login', { email: 'lockme@acme.com', password: 'wrong-' + i + '-password' })).status, 401)
+    const locked = await c.json('POST', '/api/auth/login', { email: 'lockme@acme.com', password: 'lock-me-passphrase-1' })
+    assert.equal(locked.status, 429)
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: 'a-much-better-passphrase' })).status, 200, 'other people are not affected')
+  })
+
+  it('resets a forgotten password: old password stops, other sessions end', async () => {
+    const phone = new Client()
+    await phone.json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: 'a-much-better-passphrase' })
+    assert.equal((await phone.json('GET', '/api/me')).data.user.email, 'newbie@acme.com')
+
+    const c = new Client()
+    await c.json('POST', '/api/auth/forgot', { email: 'newbie@acme.com' })
+    const token = mailToken('newbie@acme.com')
+    assert.equal((await c.json('POST', '/api/auth/reset/check', { token })).data.purpose, 'reset', 'a person with a password gets a reset, not an invitation')
+    mails.length = 0
+    assert.equal((await c.json('POST', '/api/auth/reset', { token, password: 'second-passphrase-here' })).status, 200)
+    assert.equal((await phone.json('GET', '/api/me')).data.user, null, 'the other device is signed out')
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: 'a-much-better-passphrase' })).status, 401, 'old password no longer works')
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: 'second-passphrase-here' })).status, 200)
+    assert.ok(mails.some((m) => m.subject === 'Your SEAM password was changed' && m.to.includes('newbie@acme.com')), 'told about the change')
+    PASSWORDS.set('newbie@acme.com', 'second-passphrase-here')
+  })
+
+  it('a newer link replaces an older one', async () => {
+    const c = new Client()
+    await c.json('POST', '/api/auth/forgot', { email: 'jane@acme.com' })
+    const first = mailToken('jane@acme.com')
+    await c.json('POST', '/api/auth/forgot', { email: 'jane@acme.com' })
+    const second = mailToken('jane@acme.com')
+    assert.equal((await c.json('POST', '/api/auth/reset/check', { token: first })).status, 400)
+    assert.equal((await c.json('POST', '/api/auth/reset/check', { token: second })).status, 200)
+    await c.json('POST', '/api/auth/reset', { token: second, password: TEST_PASSWORD }) // keep Jane's test password
+  })
+
+  it('changes a password when signed in, and ends the other sessions', async () => {
+    const here = new Client()
+    const there = new Client()
+    const pw = 'second-passphrase-here'
+    await here.json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: pw })
+    await there.json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: pw })
+
+    assert.equal((await new Client().json('POST', '/api/auth/password', { current: pw, next: 'a-third-passphrase-1' })).status, 401, 'must be signed in')
+    assert.equal((await here.json('POST', '/api/auth/password', { current: 'wrong-current-pw-1', next: 'a-third-passphrase-1' })).status, 400)
+    assert.equal((await here.json('POST', '/api/auth/password', { current: pw, next: 'short' })).status, 400)
+    assert.equal((await here.json('POST', '/api/auth/password', { current: pw, next: pw })).status, 400, 'not the same one')
+    assert.equal((await here.json('POST', '/api/auth/password', { current: pw, next: 'a-third-passphrase-1' })).status, 200)
+
+    assert.equal((await here.json('GET', '/api/me')).data.user.email, 'newbie@acme.com', 'this device stays signed in')
+    assert.equal((await there.json('GET', '/api/me')).data.user, null, 'the other device is signed out')
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: pw })).status, 401)
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'newbie@acme.com', password: 'a-third-passphrase-1' })).status, 200)
+  })
+
+  it('lets an admin send a password link, and shows who has set one', async () => {
+    const jane = new Client()
+    await jane.signIn('jane@acme.com')
+    const list = ((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === acme)!.users as Json[]
+    const fresh = list.find((u) => u.email === 'lockme@acme.com')!
+    assert.equal(fresh.hasPassword, true)
+    await run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES ('u-nopass', 'nopass@acme.com', 'No Pass', 'client', $1, '2026-01-01T00:00:00.000Z')", acme)
+    await run("INSERT INTO memberships (user_id, client_id) VALUES ('u-nopass', $1)", acme)
+    const after = ((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === acme)!.users as Json[]
+    assert.equal(after.find((u) => u.email === 'nopass@acme.com')!.hasPassword, false)
+
+    mails.length = 0
+    const sent = await admin.json('POST', '/api/admin/users/u-nopass/password-link')
+    assert.equal(sent.data.emailSent, true)
+    assert.equal(sent.data.hadPassword, false)
+    assert.ok(mails.some((m) => m.subject === 'Set your SEAM password' && m.to.includes('nopass@acme.com')))
+    assert.equal((await jane.json('POST', '/api/admin/users/u-nopass/password-link')).status, 403)
+    assert.equal((await admin.json('POST', '/api/admin/users/nobody/password-link')).status, 404)
+  })
+
+  it('applies one set of password rules', async () => {
+    const { passwordProblem } = await import('../auth.js')
+    assert.equal(passwordProblem('long-enough-passphrase', 'a@b.com'), null)
+    assert.match(passwordProblem('short', 'a@b.com')!, /at least 10/)
+    assert.match(passwordProblem('x'.repeat(129), 'a@b.com')!, /128/)
+    assert.match(passwordProblem('aaaaaaaaaaaa', 'a@b.com')!, /repeated/)
+    assert.match(passwordProblem('Password123', 'a@b.com') ?? 'ok', /ok|common/) // 11 chars; fine or common
+    assert.match(passwordProblem('zainreza-1998-x', 'zainreza@gmail.com')!, /email name/)
+    assert.equal(passwordProblem('ab-1234567-cd', 'ab@x.com'), null, 'short email names are not matched')
+  })
+
+  it('cleans up', async () => {
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    setMailTransportForTests(null)
+    config.emailProvider = 'console'
+    config.smtpUser = ''
+  })
+})
+
+describe('reopening and editing a ticket', () => {
+  const admin = new Client()
+  const jane = new Client()
+  const sam = new Client()
+  let acme = ''
+  const mails: Json[] = []
+
+  before(async () => {
+    await run('DELETE FROM rate_hits')
+    await admin.signIn('admin@test.com')
+    acme = ((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.name === 'Acme')!.id
+    await jane.signIn('jane@acme.com')
+    await sam.signIn('sam@globex.com')
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    config.emailProvider = 'smtp'; config.smtpUser = 'sender@gmail.com'
+    setMailTransportForTests({ sendMail: async (m) => { mails.push(m); return {} } })
+  })
+
+  it('lets a client reopen something that is done, back into the team\'s inbox', async () => {
+    const id = (await jane.json('POST', '/api/reports', { title: 'Came back', clientId: acme, withVideo: false })).data.report.id
+    assert.equal((await jane.json('POST', `/api/reports/${id}/reopen`, {})).status, 409, 'only done items can be reopened')
+    await jane.json('POST', `/api/reports/${id}/approve`, {})
+    mails.length = 0
+    const r = await jane.json('POST', `/api/reports/${id}/reopen`, { note: 'Still happens on Firefox' })
+    assert.equal(r.status, 200)
+    assert.equal(r.data.report.status, 'New')
+    assert.equal(r.data.report.resolvedAt, undefined, 'the resolved date is cleared')
+    const h = r.data.report.history as Json[]
+    assert.ok(h.some((x) => x.kind === 'outcome' && x.text === 'Reopened by client: Still happens on Firefox'))
+    assert.ok(h.some((x) => x.text === 'Closed by client'), 'the earlier closure stays in the history')
+    assert.ok(h.some((x) => x.kind === 'status' && x.from === 'Resolved' && x.to === 'New'))
+    assert.ok(mails.some((m) => m.subject === `${id} · Reopened by client` && m.to.includes('admin@test.com')))
+    const inbox = ((await admin.json('GET', '/api/reports')).data.reports as Json[]).find((x) => x.id === id)!
+    assert.equal(inbox.status, 'New')
+    // closed again later, the new resolved date is recorded
+    await jane.json('POST', `/api/reports/${id}/approve`, {})
+    assert.ok(((await jane.json('GET', `/api/reports/${id}`)).data.report).resolvedAt)
+  })
+
+  it('only the client\'s own project can reopen, and admins use their status menu', async () => {
+    const id = (await jane.json('POST', '/api/reports', { title: 'Not yours to reopen', clientId: acme, withVideo: false })).data.report.id
+    await jane.json('POST', `/api/reports/${id}/approve`, {})
+    assert.equal((await sam.json('POST', `/api/reports/${id}/reopen`, {})).status, 404)
+    assert.equal((await admin.json('POST', `/api/reports/${id}/reopen`, {})).status, 403)
+  })
+
+  it('brings a request\'s roadmap card back out of Done when it is reopened', async () => {
+    const rep = (await jane.json('POST', '/api/reports', { title: 'Reopen card', kind: 'Feature request', clientId: acme, withVideo: false })).data.report
+    await jane.json('POST', `/api/reports/${rep.id}/approve`, {})
+    const card = (id: string) => ((jane.json('GET', '/api/roadmap')) as Promise<{ data: Json }>).then((r) => (r.data.items as Json[]).find((i) => (i.reportIds as string[]).includes(id))!)
+    assert.equal((await card(rep.id)).state, 'Done')
+    await jane.json('POST', `/api/reports/${rep.id}/reopen`, {})
+    const after = await card(rep.id)
+    assert.equal(after.state, 'Under review')
+    assert.match(after.lastMove.text, /reopened by the client/)
+  })
+
+  it('lets a client add to their own ticket and tells the team', async () => {
+    const id = (await jane.json('POST', '/api/reports', { title: 'Short title', description: 'First words', clientId: acme, withVideo: false })).data.report.id
+    mails.length = 0
+    const r = await jane.json('PATCH', `/api/reports/${id}/details`, { title: 'A much clearer title', description: 'First words, and now the steps to repeat it', pageUrl: 'https://app.acme.com/checkout' })
+    assert.equal(r.status, 200)
+    assert.equal(r.data.report.title, 'A much clearer title')
+    assert.equal(r.data.report.description, 'First words, and now the steps to repeat it')
+    assert.equal(r.data.report.pageUrl, 'https://app.acme.com/checkout')
+    assert.ok((r.data.report.history as Json[]).some((h) => h.kind === 'edit' && /Updated the title and description and page or link/.test(h.text)))
+    assert.ok(mails.some((m) => /Updated by Acme/.test(m.subject) && m.to.includes('admin@test.com')))
+    mails.length = 0
+    await jane.json('PATCH', `/api/reports/${id}/details`, { description: 'First words, and now the steps to repeat it' })
+    assert.equal(mails.length, 0, 'no change, no email')
+    assert.equal((await jane.json('PATCH', `/api/reports/${id}/details`, { title: '   ' })).status, 400)
+    assert.equal((await jane.json('PATCH', `/api/reports/${id}/details`, { description: 'x'.repeat(4001) })).status, 400)
+  })
+
+  it('keeps an editable ticket private to its project, and still editable after it is done', async () => {
+    const id = (await jane.json('POST', '/api/reports', { title: 'Edit me', clientId: acme, withVideo: false })).data.report.id
+    assert.equal((await sam.json('PATCH', `/api/reports/${id}/details`, { description: 'hijack' })).status, 404)
+    assert.equal((await admin.json('PATCH', `/api/reports/${id}/details`, { description: 'x' })).status, 403, 'admins edit through their own route')
+    await jane.json('POST', `/api/reports/${id}/approve`, {})
+    assert.equal((await jane.json('PATCH', `/api/reports/${id}/details`, { description: 'Added after it was closed' })).status, 200)
+  })
+
+  it('keeps a request\'s roadmap card in step with its edited words', async () => {
+    const rep = (await jane.json('POST', '/api/reports', { title: 'Old card title', description: 'old', kind: 'Feature request', clientId: acme, withVideo: false })).data.report
+    await jane.json('PATCH', `/api/reports/${rep.id}/details`, { title: 'New card title', description: 'new words' })
+    const card = ((await jane.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => (i.reportIds as string[]).includes(rep.id))!
+    assert.equal(card.title, 'New card title')
+    assert.equal(card.description, 'new words')
+  })
+
+  it('cleans up', async () => {
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    setMailTransportForTests(null); config.emailProvider = 'console'; config.smtpUser = ''
   })
 })

@@ -48,6 +48,14 @@ These were asked for directly, so they replace the spec's version:
 - **Roadmap cards carry the ids of the client's own linked reports** so a card can lead to its conversation. These are
   reports in the client's own projects that they can already open.
 
+- **Email and password sign-in** replaces the spec's emailed sign-in link. The sign-in screen has Email, Password with a Show
+  control, and Forgot your password. First-time setup and resets use a one-time emailed link to a set-password page.
+- **Clients can reopen** anything that is done (it returns to the team's inbox as New, and the earlier closure stays in the
+  history), and **edit their own ticket's title, description and link** after sending it. Notes go in the conversation,
+  which the interface now calls Notes and replies.
+- **Profile menu** top right for everyone signed in: initials, name, email, role, the projects they can switch between,
+  Account and Sign out.
+
 ## Design defaults used (from the spec's own list)
 
 Breakpoints 768px and 1024px, default tracker columns, export scope, 224px sidebar and 480px drawer. Lower-frequency

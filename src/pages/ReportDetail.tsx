@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, ExternalLink, MessageCircleQuestion, XCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ExternalLink, MessageCircleQuestion, Pencil, RotateCcw, XCircle } from 'lucide-react'
 import { useAuth } from '../lib/auth'
-import { addClientComment, approveReport, clientConfirm, useReports, useReportsLoaded } from '../lib/store'
+import { addClientComment, approveReport, clientConfirm, reopenReport, updateDetails, useReports, useReportsLoaded } from '../lib/store'
 import { moveItem, useRoadmap } from '../lib/roadmap'
 import { hasSeverity, ROADMAP_STATES, type RoadmapState } from '../lib/types'
 import { Conversation, History } from '../components/Activity'
@@ -22,6 +22,13 @@ export function ReportDetail() {
   const [approving, setApproving] = useState(false)
   const [approveNote, setApproveNote] = useState('')
   const [askApprove, setAskApprove] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState({ title: '', description: '', pageUrl: '' })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [titleError, setTitleError] = useState('')
+  const [askReopen, setAskReopen] = useState(false)
+  const [reopenNote, setReopenNote] = useState('')
+  const [reopening, setReopening] = useState(false)
 
   if (!report && !loaded) return <Skeleton rows={4} />
   if (!report) {
@@ -45,6 +52,24 @@ export function ReportDetail() {
     setDeciding(null)
   }
 
+  function startEdit() {
+    setDraft({ title: report!.title, description: report!.description, pageUrl: report!.pageUrl })
+    setTitleError('')
+    setEditing(true)
+  }
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!draft.title.trim()) { setTitleError('A ticket needs a title.'); return }
+    setSavingEdit(true)
+    if (await updateDetails(report!.id, { title: draft.title.trim(), description: draft.description.trim(), pageUrl: draft.pageUrl.trim() })) setEditing(false)
+    setSavingEdit(false)
+  }
+  async function reopen() {
+    setReopening(true)
+    if (await reopenReport(report!.id, reopenNote)) { setAskReopen(false); setReopenNote('') }
+    setReopening(false)
+  }
+
   async function approve() {
     setApproving(true)
     if (await approveReport(report!.id, approveNote)) { setAskApprove(false); setApproveNote('') }
@@ -61,9 +86,22 @@ export function ReportDetail() {
       <Link to="/reports" className="mb-4 inline-flex min-h-9 items-center gap-1 text-muted"><ArrowLeft className="h-4 w-4" aria-hidden="true" />My items</Link>
       <header className="mb-6">
         <p className="flex flex-wrap items-center gap-2 text-sm text-muted"><Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>Submitted <Mono>{fmtDateTime(report.createdAt)}</Mono></span></p>
-        <h1 className="mt-1 break-words font-semibold">{report.title}</h1>
+        <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
+          <h1 className="min-w-0 break-words font-semibold">{report.title}</h1>
+          {!editing && <Button variant="secondary" onClick={startEdit}><Pencil className="h-4 w-4" aria-hidden="true" />Edit details</Button>}
+        </div>
         <p className="mt-2 flex flex-wrap items-center gap-2"><StatusBadge status={report.status} /><KindTag kind={report.kind} />{hasSeverity(report.kind) && <SeverityBadge severity={report.severity} />}{card && <StageBadge stage={card.state} />}</p>
       </header>
+
+      {editing && (
+        <form onSubmit={saveEdit} noValidate aria-labelledby="edit-h" className="mb-6 space-y-4 rounded-card border border-line bg-surface p-4">
+          <h2 id="edit-h" className="font-semibold">Edit details</h2>
+          <Field label="Title" required error={titleError}><input className="input" maxLength={120} value={draft.title} onChange={(e) => { setDraft({ ...draft, title: e.target.value }); setTitleError('') }} autoFocus /></Field>
+          <Field label="Description" hint="Add anything that helps: steps to repeat it, what you expected, who it affects."><textarea className="input" rows={5} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></Field>
+          <Field label="Page or link"><input className="input" value={draft.pageUrl} placeholder="https://…" onChange={(e) => setDraft({ ...draft, pageUrl: e.target.value })} /></Field>
+          <div className="flex gap-2"><Button type="submit" pending={savingEdit}>Save</Button><Button variant="tertiary" onClick={() => setEditing(false)}>Cancel</Button></div>
+        </form>
+      )}
 
       {card && (
         <section aria-labelledby="stage-h" className="mb-6 rounded-card border border-line bg-surface p-4">
@@ -108,6 +146,19 @@ export function ReportDetail() {
         </section>
       )}
 
+      {report.status === 'Resolved' && (
+        <section aria-labelledby="reopen-h" className="mb-6 rounded-card border border-line bg-surface p-4">
+          <h2 id="reopen-h" className="font-semibold">This is done</h2>
+          <p className="mt-1 text-muted">If it is not right after all, or it came back, you can reopen it. It goes back to the team.</p>
+          {askReopen ? (
+            <div className="mt-3">
+              <Field label="What is wrong?" hint="Optional, but it helps."><textarea className="input" rows={3} value={reopenNote} onChange={(e) => setReopenNote(e.target.value)} autoFocus /></Field>
+              <div className="mt-2 flex gap-2"><Button onClick={reopen} pending={reopening}><RotateCcw className="h-4 w-4" aria-hidden="true" />Reopen</Button><Button variant="tertiary" onClick={() => setAskReopen(false)}>Cancel</Button></div>
+            </div>
+          ) : <Button variant="secondary" className="mt-3" onClick={() => setAskReopen(true)}><RotateCcw className="h-4 w-4" aria-hidden="true" />Reopen</Button>}
+        </section>
+      )}
+
       {!verify && report.status !== 'Resolved' && (
         <section aria-labelledby="done-h" className="mb-6 rounded-card border border-line bg-surface p-4">
           <h2 id="done-h" className="font-semibold">Is this done?</h2>
@@ -124,7 +175,11 @@ export function ReportDetail() {
       <div className="grid gap-8 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-3">
           {report.hasVideo && <section aria-labelledby="orig-h"><h2 id="orig-h" className="mb-2 font-semibold">Your video</h2><VideoEvidence src={`/api/reports/${report.id}/video`} title={`Your video for ${report.title}`} /></section>}
-          {report.description && <section aria-labelledby="desc-h"><h2 id="desc-h" className="mb-2 font-semibold">Details</h2><p className="whitespace-pre-wrap break-words">{report.description}</p>{report.pageUrl && <p className="mt-2 break-all text-sm text-muted">{report.pageUrl}</p>}</section>}
+          <section aria-labelledby="desc-h">
+            <h2 id="desc-h" className="mb-2 font-semibold">Details</h2>
+            {report.description ? <p className="whitespace-pre-wrap break-words">{report.description}</p> : <p className="text-muted">No description yet. Use Edit details to add one.</p>}
+            {report.pageUrl && <p className="mt-2 break-all text-sm text-muted">{report.pageUrl}</p>}
+          </section>
           {report.resolutionUrl && (
             <section aria-labelledby="res-h" className="rounded-card border border-line bg-surface p-4">
               <h2 id="res-h" className="font-semibold">From the team</h2>
@@ -136,11 +191,11 @@ export function ReportDetail() {
         </div>
 
         <section aria-labelledby="conv-h" className="lg:col-span-2">
-          <h2 id="conv-h" className="mb-3 font-semibold">Conversation</h2>
+          <h2 id="conv-h" className="mb-3 font-semibold">Notes and replies</h2>
           <Conversation history={report.history} viewer="client" />
           <form className="mt-4" onSubmit={(e) => { e.preventDefault(); if (message.trim()) send() }}>
-            <Field label="Add a message"><textarea className="input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
-            <div className="mt-2 flex justify-end"><Button type="submit" pending={sending} disabled={!message.trim()}>Send message</Button></div>
+            <Field label="Add a note" hint="The team sees every note."><textarea className="input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
+            <div className="mt-2 flex justify-end"><Button type="submit" pending={sending} disabled={!message.trim()}>Add note</Button></div>
           </form>
         </section>
       </div>

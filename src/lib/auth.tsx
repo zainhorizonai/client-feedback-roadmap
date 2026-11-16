@@ -1,17 +1,25 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { api } from './api'
+import { forgetReturnPath } from './returnTo'
 import { resetRoadmap } from './roadmap'
 import { resetStore } from './store'
 import type { User } from './types'
+
+export interface PasswordLink { purpose: 'invite' | 'reset'; email: string; name: string }
 
 interface Auth {
   user: User | null
   /** Upload limit, from server configuration. */
   maxVideoMb: number
   loading: boolean
-  /** Asks the server to email a sign-in link. devLink is only returned in local development. */
-  requestLink: (email: string) => Promise<{ devLink?: string }>
-  verify: (token: string) => Promise<void>
+  signIn: (email: string, password: string) => Promise<void>
+  /** Asks for a link to set or reset a password. devLink is only returned in local development. */
+  forgot: (email: string) => Promise<{ devLink?: string }>
+  /** What a link is for, without using it up. */
+  checkLink: (token: string) => Promise<PasswordLink>
+  /** Sets the password from a link, and signs in. */
+  setPassword: (token: string, password: string) => Promise<void>
+  changePassword: (current: string, next: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -29,19 +37,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
-  const requestLink = useCallback((email: string) => api.post<{ devLink?: string }>('/api/auth/request', { email }), [])
-  const verify = useCallback(async (token: string) => {
-    const r = await api.post<{ user: User }>('/api/auth/verify', { token })
-    setUser(r.user)
+  const signIn = useCallback(async (email: string, password: string) => {
+    setUser((await api.post<{ user: User }>('/api/auth/login', { email, password })).user)
+  }, [])
+  const forgot = useCallback((email: string) => api.post<{ devLink?: string }>('/api/auth/forgot', { email }), [])
+  const checkLink = useCallback((token: string) => api.post<PasswordLink>('/api/auth/reset/check', { token }), [])
+  const setPassword = useCallback(async (token: string, password: string) => {
+    setUser((await api.post<{ user: User }>('/api/auth/reset', { token, password })).user)
+  }, [])
+  const changePassword = useCallback(async (current: string, next: string) => {
+    await api.post('/api/auth/password', { current, next })
   }, [])
   const signOut = useCallback(async () => {
     await api.post('/api/auth/logout').catch(() => {})
+    forgetReturnPath()
     resetStore()
     resetRoadmap()
     setUser(null)
   }, [])
 
-  return <Ctx.Provider value={{ user, maxVideoMb, loading, requestLink, verify, signOut }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ user, maxVideoMb, loading, signIn, forgot, checkLink, setPassword, changePassword, signOut }}>{children}</Ctx.Provider>
 }
 
 export function useAuth(): Auth {

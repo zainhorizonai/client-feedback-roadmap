@@ -5,7 +5,7 @@ import { fmtDateTime, Mono } from './ui'
 /** The shared conversation between the client and the team. Internal notes never appear here. */
 export function Conversation({ history, viewer }: { history: HistoryEntry[]; viewer: 'client' | 'admin' }) {
   const messages = history.filter((h) => h.kind === 'reply' || h.kind === 'comment')
-  if (messages.length === 0) return <p className="text-muted">No messages yet.</p>
+  if (messages.length === 0) return <p className="text-muted">No notes yet.</p>
   return (
     <ol className="space-y-3">
       {messages.map((m, i) => {

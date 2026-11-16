@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { Inbox, LogOut, Map, Rows3, Users, type LucideIcon } from 'lucide-react'
+import { Inbox, LogOut, Map, Rows3, UserRound, Users, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/project'
 import { useReportsSync } from '../lib/store'
@@ -52,6 +52,7 @@ export function AdminShell() {
         </nav>
         <nav className="mt-6 space-y-1 border-t border-cream/20 pt-4" aria-label="Manage">
           <NavLink to="/admin/clients" className={link}><Users className="h-4 w-4" aria-hidden="true" />Projects and people</NavLink>
+          <NavLink to="/account" className={link}><UserRound className="h-4 w-4" aria-hidden="true" />Account</NavLink>
         </nav>
         <div className="mt-auto border-t border-cream/20 pt-4">
           <p className="truncate font-semibold">{user.name}</p>
@@ -69,6 +70,7 @@ export function AdminShell() {
         <nav className="flex gap-1 overflow-x-auto px-3 pb-3" aria-label="Workspace">
           {NAV.map((n) => <NavLink key={n.to} to={n.to} className={link}>{n.label}</NavLink>)}
           <NavLink to="/admin/clients" className={link}>People</NavLink>
+          <NavLink to="/account" className={link}>Account</NavLink>
         </nav>
       </header>
 

@@ -20,8 +20,8 @@ React + Vite frontend, Hono API on Vercel Functions, Postgres (Neon), videos in 
    - `ADMIN_EMAILS` = your email (comma-separate more). These people become admins the first time they sign in.
    - `CRON_SECRET` = any long random string. Enables the nightly cleanup of abandoned drafts and expired sign-in data.
    - `APP_URL` = optional. Defaults to the deployment URL. Set it to your custom domain once you add one.
-6. **Redeploy** so the new variables apply, open the site, and sign in with your admin email.
-7. In the app: **Clients** > add a client > invite their lead.
+6. **Redeploy** so the new variables apply. Open the site, choose **Forgot your password?**, enter your admin email, and set a password from the link we email you. After that you sign in with your email and password. (Email has to be working for this first step, see step 4.)
+7. In the app: **Projects and people** > add a project > invite their lead. They get an email with a link to set their own password. If an invitation email did not arrive, use **Send set-password link** next to their name.
 
 Optional: set `MAX_VIDEO_MB` (default 500).
 
@@ -29,6 +29,15 @@ Optional: set `MAX_VIDEO_MB` (default 500).
 
 - **Clients** use one page, **My items**. They send a Bug, UAT finding, Feature request or Question (video optional, no time limit on a recording). Bugs and UAT findings go to the fix list; features and questions land on their roadmap. They switch between a list and the roadmap stages, filter by type and status, see how many items are pending, approve anything as done, confirm or reject a fix, and drag their roadmap cards between stages. A client can be invited into several projects and switches between them.
 - **Admins** triage new reports in the **Inbox**, work everything in the **Tracker**, reply to clients and keep private internal notes in the report drawer, and build the **Roadmap**: create items, link the reports they cover, and publish them. Publishing is always explicit. An item moving to Done does not resolve its reports. Admins see when a client moved a card.
+
+## Accounts and passwords
+
+Sign-in is email and password. There is no magic-link sign-in.
+
+- **First password:** an invitation (or **Forgot your password?** for an address that has an account) emails a one-time link to a page where the person chooses a password. The link works once, lasts 7 days for an invitation and 1 hour for a reset, and is only used up when the form is submitted, so email scanners that open it cannot spoil it.
+- **Passwords** are stored only as salted scrypt hashes (built into Node). The rules are at least 10 characters, not a common password, and not containing the email name.
+- **Protection:** wrong attempts are counted per address and per network and block sign-in for a few minutes. The same message is shown for a wrong password and an unknown address, and the response takes the same time. Resetting or changing a password signs out every other device and sends a notice email.
+- **Account page:** change your own password. Admins can send anyone a set-password or reset link from **Projects and people**.
 
 ## How uploads work on Vercel
 
@@ -42,7 +51,7 @@ cp .env.example .env      # then set ADMIN_EMAILS to your email
 npm run dev               # web on :5173, API on :8787
 ```
 
-No accounts needed locally. With `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` empty, an embedded Postgres (PGlite, stored in `./data/pgdata`) and local-disk video storage are used. It is the same SQL as production. Emails print in the terminal, and the sign-in page shows an "Open sign-in link" button.
+No accounts needed locally. Run `npm run seed` for demo data and demo passwords (it prints them; `seam-demo-1234` unless you set `SEED_PASSWORD`). Or choose **Forgot your password?** on the sign-in page: in local development the page shows the link directly, so you never need a mailbox. With `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` empty, an embedded Postgres (PGlite, stored in `./data/pgdata`) and local-disk video storage are used. It is the same SQL as production. Emails print in the terminal.
 
 `npm run seed` adds two demo clients with a few reports (no videos).
 

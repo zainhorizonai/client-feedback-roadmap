@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { config } from './config.js'
 import { all, batch, createRoadmapItemForReport, isUniqueViolation, one, ROADMAP_KINDS, run } from './db.js'
-import { clientIp, logout, rateLimited, requestLogin, verifyLogin, withUser, type AuthUser } from './auth.js'
+import { changePassword, checkPasswordToken, clientIp, login, logout, passwordProblem, rateLimited, recordFailure, requestPasswordEmail, resetPassword, sendPasswordEmail, tooManyFailures, withUser, type AuthUser } from './auth.js'
 import { escapeHtml, layout, sendEmail, sendQuietly } from './email.js'
 import { blobPrefix, extFor, getStorage, isAllowedMime, normalizeMime, TooLargeError } from './storage.js'
 
@@ -290,25 +290,77 @@ app.get('/api/health/deep', async (c) => {
   })
 })
 
-app.post('/api/auth/request', async (c) => {
+const WINDOW = 15 * 60_000
+const TOO_MANY = 'Too many attempts. Try again in a few minutes.'
+const WRONG = 'Email or password is incorrect.'
+
+/** Email and password. Wrong attempts are counted per address and per network, and the message never says which part was wrong. */
+app.post('/api/auth/login', async (c) => {
   const body = await json(c)
   const email = text(body.email, 'email', 200, true).toLowerCase()
-  if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address')
-  if ((await rateLimited(`req-ip:${clientIp(c)}`, 20, 15 * 60_000)) || (await rateLimited(`req-email:${email}`, 5, 15 * 60_000))) {
-    throw new HttpError(429, 'Too many attempts. Try again in a few minutes.')
+  const password = typeof body.password === 'string' ? body.password : ''
+  if (!password || password.length > 256) throw new HttpError(400, 'Enter your password')
+  const ipKey = `login-ip:${clientIp(c)}`
+  const emailKey = `login-email:${email}`
+  if ((await tooManyFailures(ipKey, 40, WINDOW)) || (await tooManyFailures(emailKey, 8, WINDOW))) throw new HttpError(429, TOO_MANY)
+  const user = await login(c, email, password)
+  if (!user) {
+    await recordFailure(ipKey)
+    await recordFailure(emailKey)
+    throw new HttpError(401, WRONG)
   }
-  const link = await requestLogin(email)
-  // The response is identical whether or not the address is known. The link is only echoed in local dev.
+  return c.json({ user })
+})
+
+/** First-time setup and forgotten passwords both start here. The answer is the same whether or not the address has an account. */
+app.post('/api/auth/forgot', async (c) => {
+  const email = text((await json(c)).email, 'email', 200, true).toLowerCase()
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address')
+  if ((await rateLimited(`forgot-ip:${clientIp(c)}`, 20, WINDOW)) || (await rateLimited(`forgot-email:${email}`, 3, WINDOW))) throw new HttpError(429, TOO_MANY)
+  const link = await requestPasswordEmail(email)
+  // The link is only echoed in local development, where email is just printed.
   const devLink = link && !config.isProd && config.emailProvider === 'console' ? link : undefined
   return c.json({ ok: true, devLink })
 })
 
-app.post('/api/auth/verify', async (c) => {
-  if (await rateLimited(`verify-ip:${clientIp(c)}`, 30, 15 * 60_000)) throw new HttpError(429, 'Too many attempts. Try again in a few minutes.')
+/** Says what a link is for without using it up, so the page can show "expired" before asking for a password. */
+app.post('/api/auth/reset/check', async (c) => {
+  if (await rateLimited(`token-ip:${clientIp(c)}`, 60, WINDOW)) throw new HttpError(429, TOO_MANY)
+  const info = await checkPasswordToken(text((await json(c)).token, 'token', 200, true))
+  if (!info) throw new HttpError(400, 'This link has expired or was already used. Ask for a new one.')
+  return c.json({ purpose: info.purpose, email: info.email, name: info.name })
+})
+
+app.post('/api/auth/reset', async (c) => {
+  if (await rateLimited(`reset-ip:${clientIp(c)}`, 30, WINDOW)) throw new HttpError(429, TOO_MANY)
   const body = await json(c)
-  const user = await verifyLogin(c, text(body.token, 'token', 200, true))
-  if (!user) throw new HttpError(400, 'This sign-in link is invalid or has expired. Request a new one.')
+  const token = text(body.token, 'token', 200, true)
+  const password = typeof body.password === 'string' ? body.password : ''
+  const info = await checkPasswordToken(token)
+  if (!info) throw new HttpError(400, 'This link has expired or was already used. Ask for a new one.')
+  const problem = passwordProblem(password, info.email)
+  if (problem) throw new HttpError(400, problem)
+  const user = await resetPassword(c, token, password)
+  if (!user) throw new HttpError(400, 'This link has expired or was already used. Ask for a new one.')
   return c.json({ user })
+})
+
+/** Change your own password. Needs the current one, and signs out your other devices. */
+app.post('/api/auth/password', async (c) => {
+  const user = requireUser(c)
+  const body = await json(c)
+  const current = typeof body.current === 'string' ? body.current : ''
+  const next = typeof body.next === 'string' ? body.next : ''
+  const key = `pw-change:${user.id}`
+  if (await tooManyFailures(key, 6, WINDOW)) throw new HttpError(429, TOO_MANY)
+  const problem = passwordProblem(next, user.email)
+  if (problem) throw new HttpError(400, problem)
+  if (next === current) throw new HttpError(400, 'Choose a password you have not just used.')
+  if (!(await changePassword(c, user, current, next))) {
+    await recordFailure(key)
+    throw new HttpError(400, 'Your current password is not right.')
+  }
+  return c.json({ ok: true })
 })
 
 app.post('/api/auth/logout', async (c) => {
@@ -612,6 +664,64 @@ app.post('/api/reports/:id/approve', async (c) => {
   return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
 })
 
+// A client can bring back something that was closed: it was not really fixed, or they changed their mind.
+app.post('/api/reports/:id/reopen', async (c) => {
+  const user = requireClient(c)
+  const r = await loadReport(user, c.req.param('id'))
+  if (r.status !== 'Resolved') throw new HttpError(409, 'Only something that is done can be reopened')
+  const note = text((await json(c)).note, 'note', 2000)
+  // Back to New, so it lands in the team's Inbox again. A card that stood for just this request leaves Done.
+  const items = await all<{ id: string; state: string }>(
+    `SELECT i.id, i.state FROM roadmap_items i WHERE i.state = 'Done' AND i.id IN (
+       SELECT l.item_id FROM roadmap_links l GROUP BY l.item_id HAVING COUNT(*) = 1 AND MIN(l.report_id) = $1)`,
+    r.id,
+  )
+  await batch([
+    historyStmt(r.id, 'client', 'status', 'Status changed from Resolved to New', 'Resolved', 'New'),
+    historyStmt(r.id, 'client', 'outcome', note ? `Reopened by client: ${note}` : 'Reopened by client'),
+    ["UPDATE reports SET status = 'New', resolved_at = NULL WHERE id = $1", [r.id]],
+    ...items.flatMap((i): Stmt[] => [
+      ["UPDATE roadmap_items SET state = 'Under review', updated_at = $1 WHERE id = $2", [now(), i.id]],
+      ['INSERT INTO roadmap_events (item_id, at, by, text) VALUES ($1, $2, $3, $4)', [i.id, now(), 'client', 'Moved from Done to Under review (reopened by the client)']],
+    ]),
+  ])
+  await mailAdmins(`${r.id} · Reopened by client`, [`${r.client_name} reopened "${r.title}".`, ...(note ? [note] : [])], r.id)
+  return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
+})
+
+// A client can add to their own ticket after sending it: a better title, more description, a link.
+app.patch('/api/reports/:id/details', async (c) => {
+  const user = requireClient(c)
+  const r = await loadReport(user, c.req.param('id'))
+  const body = await json(c)
+  const sets: string[] = []
+  const vals: string[] = []
+  const changed: string[] = []
+  const set = (col: string, v: string, label: string) => { vals.push(v); sets.push(`${col} = $${vals.length}`); changed.push(label) }
+  if ('title' in body) { const t = text(body.title, 'title', 120, true); if (t !== r.title) set('title', t, 'title') }
+  if ('description' in body) { const d = text(body.description, 'description', 4000); if (d !== r.description) set('description', d, 'description') }
+  if ('pageUrl' in body) { const u = text(body.pageUrl, 'pageUrl', 500); if (u !== r.page_url) set('page_url', u, 'page or link') }
+  if (sets.length) {
+    const stmts: Stmt[] = [
+      [`UPDATE reports SET ${sets.join(', ')} WHERE id = $${vals.length + 1}`, [...vals, r.id]],
+      historyStmt(r.id, 'client', 'edit', `Updated the ${changed.join(' and ')}`),
+    ]
+    // A roadmap card that stands for just this request shows the same words.
+    const t = 'title' in body && changed.includes('title') ? String(body.title).trim() : null
+    const d = 'description' in body && changed.includes('description') ? String(body.description).trim() : null
+    if (t !== null || d !== null) {
+      stmts.push([
+        `UPDATE roadmap_items SET title = COALESCE($1, title), description = COALESCE($2, description), updated_at = $3 WHERE id IN (
+           SELECT l.item_id FROM roadmap_links l GROUP BY l.item_id HAVING COUNT(*) = 1 AND MIN(l.report_id) = $4)`,
+        [t, d, now(), r.id],
+      ])
+    }
+    await batch(stmts)
+    await mailAdmins(`${r.id} · Updated by ${r.client_name}`, [`${user.name} updated the ${changed.join(' and ')} of "${r.title}".`], r.id)
+  }
+  return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
+})
+
 // ---------- roadmap items ----------
 // Separate from reports. A client only sees items published to their project, with a public description and
 // update. Linked reports are never exposed: a client gets at most a count of their own linked reports.
@@ -785,11 +895,11 @@ app.delete('/api/admin/roadmap/:id', async (c) => {
 app.get('/api/admin/clients', async (c) => {
   requireAdmin(c)
   const clients = await all<{ id: string; name: string; created_at: string }>('SELECT id, name, created_at FROM clients ORDER BY name')
-  const users = await all<{ id: string; email: string; name: string; client_id: string }>(
-    "SELECT u.id, u.email, u.name, m.client_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.role = 'client' ORDER BY u.name",
+  const users = await all<{ id: string; email: string; name: string; client_id: string; has_password: boolean }>(
+    "SELECT u.id, u.email, u.name, m.client_id, (u.password_hash IS NOT NULL) AS has_password FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.role = 'client' ORDER BY u.name",
   )
   return c.json({
-    clients: clients.map((cl) => ({ id: cl.id, name: cl.name, createdAt: cl.created_at, users: users.filter((u) => u.client_id === cl.id).map(({ id, email, name }) => ({ id, email, name })) })),
+    clients: clients.map((cl) => ({ id: cl.id, name: cl.name, createdAt: cl.created_at, users: users.filter((u) => u.client_id === cl.id).map(({ id, email, name, has_password }) => ({ id, email, name, hasPassword: has_password === true })) })),
   })
 })
 
@@ -824,12 +934,18 @@ app.post('/api/admin/clients/:id/users', async (c) => {
     await run("INSERT INTO users (id, email, name, role, client_id, created_at) VALUES ($1, $2, $3, 'client', $4, $5)", id, email, name, client.id, now())
     await run('INSERT INTO memberships (user_id, client_id) VALUES ($1, $2)', id, client.id)
   }
-  const emailSent = await sendQuietly({
-    to: email,
-    subject: addedToExisting ? `You now have access to ${client.name}` : `You have been invited to report issues for ${client.name}`,
-    text: `Hi ${existing?.name ?? name},\n\n${addedToExisting ? `You can now also send reports and see the roadmap for ${client.name}. Use the project menu to switch between your projects.` : 'You can now send us bug and UAT reports as short videos.'}\nSign in with your email (no password needed): ${config.appUrl}`,
-    html: layout(addedToExisting ? `You now have access to ${client.name}` : `Welcome, ${name}`, `<p>${addedToExisting ? `You can now also send reports and see the roadmap for <strong>${escapeHtml(client.name)}</strong>. Use the project menu to switch between your projects.` : `You can now send us bug and UAT reports as short videos for <strong>${escapeHtml(client.name)}</strong>. Sign in with your email, no password needed.`}</p>`, { label: 'Open SEAM', url: config.appUrl }),
-  })
+  let emailSent: boolean
+  if (addedToExisting) {
+    // They already have a password. Tell them about the new project and point at the project switcher.
+    emailSent = await sendQuietly({
+      to: email,
+      subject: `You now have access to ${client.name}`,
+      text: `Hi ${existing?.name},\n\nYou can now also send reports and see the roadmap for ${client.name}. Use the project menu to switch between your projects.\nSign in: ${config.appUrl}`,
+      html: layout(`You now have access to ${client.name}`, `<p>You can now also send reports and see the roadmap for <strong>${escapeHtml(client.name)}</strong>. Use the project menu to switch between your projects.</p>`, { label: 'Open SEAM', url: config.appUrl }),
+    })
+  } else {
+    emailSent = (await sendPasswordEmail({ id, email, name }, 'invite', client.name)).sent
+  }
   return c.json({ user: { id, email, name: existing?.name ?? name }, emailSent, addedToExisting }, 201)
 })
 
@@ -852,6 +968,15 @@ app.get('/api/cron/housekeeping', async (c) => {
   if (!ok) return c.json({ error: 'Not found' }, 404)
   await housekeeping()
   return c.json({ ok: true })
+})
+
+// Send someone a link to set or reset their password. Useful when an invitation email did not arrive.
+app.post('/api/admin/users/:id/password-link', async (c) => {
+  requireAdmin(c)
+  const u = await one<{ id: string; email: string; name: string; password_hash: string | null }>('SELECT id, email, name, password_hash FROM users WHERE id = $1', c.req.param('id'))
+  if (!u) throw new HttpError(404, 'Person not found')
+  const { sent } = await sendPasswordEmail(u, u.password_hash ? 'reset' : 'invite')
+  return c.json({ emailSent: sent, hadPassword: !!u.password_hash })
 })
 
 app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404))

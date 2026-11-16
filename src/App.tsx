@@ -7,7 +7,9 @@ import { AdminShell } from './components/AdminShell'
 import { ClientShell } from './components/ClientShell'
 import { Skeleton } from './components/ui'
 import { SignIn } from './pages/SignIn'
-import { Verify } from './pages/Verify'
+import { ForgotPassword } from './pages/ForgotPassword'
+import { SetPassword } from './pages/SetPassword'
+import { Account } from './pages/Account'
 import { ClientHome } from './pages/ClientHome'
 import { NewReport } from './pages/NewReport'
 import { ReportDetail } from './pages/ReportDetail'
@@ -28,7 +30,10 @@ function SignedOut() {
   useEffect(() => { rememberReturnPath(pathname + search) }, [pathname, search])
   return (
     <Routes>
-      <Route path="/auth/verify" element={<Verify />} />
+      <Route path="/forgot" element={<ForgotPassword />} />
+      <Route path="/auth/set-password" element={<SetPassword />} />
+      {/* Old emailed sign-in links no longer sign anyone in. */}
+      <Route path="/auth/verify" element={<Navigate to="/forgot" replace />} />
       <Route path="*" element={<SignIn />} />
     </Routes>
   )
@@ -43,8 +48,10 @@ function Routed() {
     return (
       <ProjectProvider>
         <Routes>
+          <Route path="/auth/set-password" element={<SetPassword />} />
           <Route path="/auth/verify" element={<Navigate to="/admin/inbox" replace />} />
           <Route element={<AdminShell />}>
+            <Route path="/account" element={<Account />} />
             <Route path="/admin" element={<AdminHome />} />
             <Route path="/admin/inbox" element={<AdminInbox />} />
             <Route path="/admin/tracker" element={<AdminTracker />} />
@@ -58,8 +65,10 @@ function Routed() {
   }
   return (
     <Routes>
+      <Route path="/auth/set-password" element={<SetPassword />} />
       <Route path="/auth/verify" element={<Navigate to="/reports" replace />} />
       <Route element={<ClientShell />}>
+        <Route path="/account" element={<Account />} />
         <Route path="/reports" element={<ClientHome />} />
         <Route path="/reports/new" element={<NewReport />} />
         <Route path="/reports/:id" element={<ReportDetail />} />

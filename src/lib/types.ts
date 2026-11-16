@@ -31,13 +31,13 @@ export interface User {
 export interface ClientOrg {
   id: string
   name: string
-  users: { id: string; email: string; name: string }[]
+  users: { id: string; email: string; name: string; hasPassword?: boolean }[]
 }
 
 export interface HistoryEntry {
   at: string
   by: 'client' | 'admin' | 'system'
-  kind: 'created' | 'status' | 'reply' | 'comment' | 'confirm' | 'outcome'
+  kind: 'created' | 'status' | 'reply' | 'comment' | 'confirm' | 'outcome' | 'edit'
   text: string
   from?: string
   to?: string

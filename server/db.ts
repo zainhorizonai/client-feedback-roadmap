@@ -118,6 +118,10 @@ const SCHEMA = [
   // Added after launch. Idempotent, so existing databases upgrade themselves on the next start.
   "INSERT INTO memberships (user_id, client_id) SELECT id, client_id FROM users WHERE role = 'client' AND client_id IS NOT NULL ON CONFLICT DO NOTHING",
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS roadmap_auto INTEGER NOT NULL DEFAULT 0',
+  // Email and password accounts. Links in email now only set or reset a password; they no longer sign anyone in.
+  'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT',
+  'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TEXT',
+  "ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'login'",
   'ALTER TABLE history ADD COLUMN IF NOT EXISTS from_value TEXT',
   'ALTER TABLE history ADD COLUMN IF NOT EXISTS to_value TEXT',
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS submitted_at TEXT',

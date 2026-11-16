@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { ensureAdmins } from './auth.js'
+import { ensureAdmins, hashPassword } from './auth.js'
 import { config } from './config.js'
 import { all, one, run } from './db.js'
 
@@ -49,3 +49,14 @@ if (((await one<{ n: number }>('SELECT COUNT(*)::int AS n FROM reports'))?.n ?? 
 }
 
 console.log(`Seeded. Clients: ${(await all('SELECT id FROM clients')).length}. Admins: ${config.adminEmails.join(', ') || '(none, set ADMIN_EMAILS)'}`)
+
+// Demo sign-ins for local development only. Never set passwords like this in production.
+if (config.isProd) {
+  console.log('Production: no demo passwords were set.')
+} else {
+  const demo = process.env.SEED_PASSWORD ?? 'seam-demo-1234'
+  const hash = await hashPassword(demo)
+  const emails = [...config.adminEmails, 'jane@acme.com', 'sam@globex.com']
+  for (const email of emails) await run('UPDATE users SET password_hash = $1 WHERE email = $2 AND password_hash IS NULL', hash, email)
+  console.log(`Demo password for ${emails.join(', ')}: ${demo}`)
+}

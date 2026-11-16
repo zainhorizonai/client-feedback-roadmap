@@ -22,14 +22,22 @@ export function AdminClients() {
     finally { setAdding(false) }
   }
 
+  async function sendLink(userId: string, email: string, hadPassword: boolean) {
+    try {
+      const r = await api.post<{ emailSent?: boolean }>(`/api/admin/users/${userId}/password-link`)
+      if (r.emailSent === false) notify(`The email to ${email} could not be sent. Check the email settings.`, 'error')
+      else notify(hadPassword ? `Reset link sent to ${email}.` : `Link to set a password sent to ${email}.`)
+    } catch (err) { notify(err instanceof ApiError ? err.message : 'Could not send the link', 'error') }
+  }
+
   async function invite(e: React.FormEvent, clientId: string) {
     e.preventDefault()
     setSending(true)
     try {
       const r = await api.post<{ emailSent?: boolean; addedToExisting?: boolean }>(`/api/admin/clients/${clientId}/users`, { name: uName, email: uEmail })
       if (r.addedToExisting) notify(`${uEmail} already had an account, so they now have access to this project too.`)
-      else if (r.emailSent === false) notify(`${uEmail} was added, but the invitation email could not be sent. They can still sign in from the sign-in page.`, 'error')
-      else notify(`Invitation sent to ${uEmail}.`)
+      else if (r.emailSent === false) notify(`${uEmail} was added, but the invitation email could not be sent. Use the send-link button next to their name once email is working.`, 'error')
+      else notify(`Invitation sent to ${uEmail}. They will set their own password.`)
       setUName(''); setUEmail(''); setInviting(null)
       await reload()
     } catch (err) { notify(err instanceof ApiError ? err.message : 'Could not send the invitation', 'error') }
@@ -38,7 +46,7 @@ export function AdminClients() {
 
   return (
     <div className="max-w-3xl">
-      <PageHeader title="Projects and people" subtitle="Each project only ever sees its own reports and published roadmap items. Invited people sign in with their email." />
+      <PageHeader title="Projects and people" subtitle="Each project only ever sees its own reports and published roadmap items. Invited people get an email to set their own password." />
 
       <form onSubmit={addProject} className="mb-6 flex flex-wrap items-end gap-2">
         <Field label="New project" className="min-w-[14rem] flex-1"><input required className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Project or client name" /></Field>
@@ -57,7 +65,15 @@ export function AdminClients() {
               </div>
               <ul className="mt-3 divide-y divide-line">
                 {p.users.length === 0 && <li className="py-2 text-muted">No one invited yet.</li>}
-                {p.users.map((u) => <li key={u.id} className="flex flex-wrap justify-between gap-x-4 py-2"><span className="font-semibold">{u.name}</span><span className="break-all text-muted">{u.email}</span></li>)}
+                {p.users.map((u) => (
+                  <li key={u.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
+                    <span><span className="font-semibold">{u.name}</span> <span className="break-all text-muted">{u.email}</span></span>
+                    <span className="flex items-center gap-2">
+                      {u.hasPassword ? <span className="text-sm text-muted">Password set</span> : <span className="badge badge-warning">Has not set a password</span>}
+                      <Button variant="tertiary" onClick={() => sendLink(u.id, u.email, !!u.hasPassword)}>{u.hasPassword ? 'Send reset link' : 'Send set-password link'}</Button>
+                    </span>
+                  </li>
+                ))}
               </ul>
               {inviting === p.id && (
                 <form onSubmit={(e) => invite(e, p.id)} className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
