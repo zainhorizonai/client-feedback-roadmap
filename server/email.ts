@@ -84,11 +84,16 @@ export async function sendQuietly(mail: Mail): Promise<boolean> {
 
 /** Records the outcome. Never throws: logging must not break the request. */
 async function logEmail(mail: Mail, error: string) {
+  await logEmailEvent(Array.isArray(mail.to) ? mail.to : [mail.to], mail.subject, error)
+}
+
+/** Also used to note a sign-in request that was skipped on purpose, so the setup check can explain it. */
+export async function logEmailEvent(toList: string[], subject: string, error: string) {
   try {
-    const to = (Array.isArray(mail.to) ? mail.to : [mail.to]).join(', ')
+    const to = toList.join(', ')
     await run(
       'INSERT INTO email_log (at, to_addr, subject, ok, error) VALUES ($1, $2, $3, $4, $5)',
-      new Date().toISOString(), to.slice(0, 300), mail.subject.slice(0, 200), error ? 0 : 1, error.replace(/\S+:\/\/\S+/g, '[url]').slice(0, 400),
+      new Date().toISOString(), to.slice(0, 300), subject.slice(0, 200), error ? 0 : 1, error.replace(/\S+:\/\/\S+/g, '[url]').slice(0, 400),
     )
   } catch (e) {
     console.error('[email] could not write the email log:', e instanceof Error ? e.message : e)

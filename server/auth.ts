@@ -3,7 +3,7 @@ import type { Context, MiddlewareHandler } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { config } from './config.js'
 import { one, run } from './db.js'
-import { escapeHtml, layout, sendQuietly } from './email.js'
+import { escapeHtml, layout, logEmailEvent, sendQuietly } from './email.js'
 
 export interface AuthUser {
   id: string
@@ -47,7 +47,12 @@ export async function requestLogin(email: string): Promise<string | null> {
   // Addresses listed in ADMIN_EMAILS become admins the first time they ask to sign in.
   if (config.adminEmails.includes(email)) await ensureAdminUser(email)
   const user = await one<{ id: string; name: string }>('SELECT id, name FROM users WHERE email = $1', email)
-  if (!user) return null // do not reveal whether the address exists
+  if (!user) {
+    // The caller gets the same answer either way, so strangers cannot probe for accounts.
+    // The admin-only setup check shows this note, which explains an email that was never attempted.
+    await logEmailEvent([email], 'Sign-in link requested', 'Nothing sent: no account for this address. It is not in ADMIN_EMAILS and has not been invited.')
+    return null
+  }
   const token = randomToken()
   await run('INSERT INTO login_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, $3)', sha256(token), user.id, iso(TOKEN_TTL_MS))
   const link = `${config.appUrl}/auth/verify?token=${token}`

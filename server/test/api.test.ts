@@ -465,3 +465,17 @@ describe('email diagnostics', () => {
     }
   })
 })
+
+describe('skipped sign-in requests are visible to the admin', () => {
+  it('notes a request for an unknown address in the setup check, without telling the requester', async () => {
+    const c = new Client()
+    const r = await c.json('POST', '/api/auth/request', { email: 'typo-address@x.com' })
+    assert.equal(r.status, 200)
+    assert.equal(r.data.devLink, undefined)
+    assert.equal(JSON.stringify(r.data).includes('no account'), false)
+    const diag = await new Client().json('GET', '/api/health/deep?key=test-cron-secret')
+    const note = (diag.data.recentEmails as Json[]).find((e) => e.to === 'typo-address@x.com')
+    assert.equal(note?.sent, false)
+    assert.match(note?.error, /no account for this address/)
+  })
+})
