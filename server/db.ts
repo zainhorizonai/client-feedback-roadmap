@@ -72,6 +72,15 @@ const SCHEMA = [
     key TEXT NOT NULL,
     at TEXT NOT NULL
   )`,
+  // A short record of every email the app tried to send, so failures can be seen without reading logs.
+  `CREATE TABLE IF NOT EXISTS email_log (
+    id SERIAL PRIMARY KEY,
+    at TEXT NOT NULL,
+    to_addr TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    error TEXT NOT NULL DEFAULT ''
+  )`,
   'CREATE INDEX IF NOT EXISTS idx_reports_client ON reports(client_id)',
   'CREATE INDEX IF NOT EXISTS idx_history_report ON history(report_id)',
   'CREATE INDEX IF NOT EXISTS idx_rate_hits ON rate_hits(key, at)',

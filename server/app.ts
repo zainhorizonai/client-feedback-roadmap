@@ -5,7 +5,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { config } from './config.js'
 import { all, batch, isUniqueViolation, one, run } from './db.js'
 import { clientIp, logout, rateLimited, requestLogin, verifyLogin, withUser, type AuthUser } from './auth.js'
-import { escapeHtml, layout, sendQuietly } from './email.js'
+import { escapeHtml, layout, sendEmail, sendQuietly } from './email.js'
 import { blobPrefix, extFor, getStorage, isAllowedMime, normalizeMime, TooLargeError } from './storage.js'
 
 type Env = { Variables: { user: AuthUser | null } }
@@ -206,7 +206,30 @@ app.get('/api/health/deep', async (c) => {
   if (!secretMatches(c.req.query('key') ?? '', config.cronSecret)) return c.json({ error: 'Not found' }, 404)
   let database = 'ok'
   try { await one('SELECT 1 AS ok') } catch (e) { database = `error: ${scrub(e)}` }
+
+  // ?sendTo=address sends a real test email right now and shows the result. Only to people already in the system.
+  let testEmail: Record<string, unknown> | undefined
+  const sendTo = (c.req.query('sendTo') ?? '').trim().toLowerCase()
+  if (sendTo) {
+    const known = config.adminEmails.includes(sendTo) || !!(await one('SELECT id FROM users WHERE email = $1', sendTo))
+    if (!known) testEmail = { to: sendTo, sent: false, error: 'Not an admin or invited user, so no test was sent.' }
+    else {
+      const started = Date.now()
+      try {
+        await sendEmail({ to: sendTo, subject: 'Feedback Portal test email', text: 'If you can read this, sending works.', html: '<p>If you can read this, sending works.</p>' })
+        testEmail = { to: sendTo, sent: true, ms: Date.now() - started, note: 'Accepted by the mail server. If it is not in the inbox, check spam and quarantine.' }
+      } catch (e) {
+        testEmail = { to: sendTo, sent: false, ms: Date.now() - started, error: scrub(e) }
+      }
+    }
+  }
+  const recentEmails = (await all<{ at: string; to_addr: string; subject: string; ok: number; error: string }>(
+    'SELECT at, to_addr, subject, ok, error FROM email_log ORDER BY id DESC LIMIT 10',
+  ).catch(() => [])).map((e) => ({ at: e.at, to: e.to_addr, subject: e.subject, sent: e.ok === 1, error: e.error || undefined }))
+
   return c.json({
+    testEmail,
+    recentEmails,
     database,
     databaseVariableFound: config.databaseUrl ? config.databaseEnvName : null,
     blobAuth: config.blobToken ? 'token' : config.blobStoreId ? 'store-id (OIDC)' : null,
@@ -524,6 +547,7 @@ export async function housekeeping() {
   await run('DELETE FROM login_tokens WHERE expires_at < $1', now())
   await run('DELETE FROM sessions WHERE expires_at < $1', now())
   await run('DELETE FROM rate_hits WHERE at < $1', new Date(Date.now() - 3600_000).toISOString())
+  await run('DELETE FROM email_log WHERE at < $1', new Date(Date.now() - 7 * 24 * 3600_000).toISOString())
 }
 
 app.get('/api/cron/housekeeping', async (c) => {

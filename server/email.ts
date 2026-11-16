@@ -1,4 +1,5 @@
 import { config } from './config.js'
+import { run } from './db.js'
 
 interface Mail { to: string | string[]; subject: string; text: string; html: string }
 
@@ -70,11 +71,26 @@ export async function sendEmail(mail: Mail): Promise<void> {
  * so a fire-and-forget email can be lost.
  */
 export async function sendQuietly(mail: Mail): Promise<boolean> {
+  let error = ''
   try {
     await sendEmail(mail)
-    return true
   } catch (e) {
-    console.error('[email] failed:', e instanceof Error ? e.message : e)
-    return false
+    error = e instanceof Error ? e.message : String(e)
+    console.error('[email] failed:', error)
+  }
+  await logEmail(mail, error)
+  return !error
+}
+
+/** Records the outcome. Never throws: logging must not break the request. */
+async function logEmail(mail: Mail, error: string) {
+  try {
+    const to = (Array.isArray(mail.to) ? mail.to : [mail.to]).join(', ')
+    await run(
+      'INSERT INTO email_log (at, to_addr, subject, ok, error) VALUES ($1, $2, $3, $4, $5)',
+      new Date().toISOString(), to.slice(0, 300), mail.subject.slice(0, 200), error ? 0 : 1, error.replace(/\S+:\/\/\S+/g, '[url]').slice(0, 400),
+    )
+  } catch (e) {
+    console.error('[email] could not write the email log:', e instanceof Error ? e.message : e)
   }
 }

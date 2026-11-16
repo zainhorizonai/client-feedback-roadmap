@@ -405,3 +405,63 @@ describe('SMTP email (Gmail)', () => {
     }
   })
 })
+
+describe('email diagnostics', () => {
+  it('records sends and failures and shows them in the setup check', async () => {
+    const { config } = await import('../config.js')
+    const { sendQuietly, setMailTransportForTests } = await import('../email.js')
+    const prev = config.emailProvider
+    config.emailProvider = 'smtp'
+    config.smtpUser = 'sender@gmail.com'
+    const c = new Client()
+    try {
+      setMailTransportForTests({ sendMail: async () => { throw new Error('535 Username and Password not accepted') } })
+      await sendQuietly({ to: 'who@x.com', subject: 'Diag failure', text: 't', html: 't' })
+      setMailTransportForTests({ sendMail: async () => ({}) })
+      await sendQuietly({ to: 'who@x.com', subject: 'Diag success', text: 't', html: 't' })
+
+      const r = await c.json('GET', '/api/health/deep?key=test-cron-secret')
+      const rows = r.data.recentEmails as Json[]
+      const fail = rows.find((e) => e.subject === 'Diag failure')
+      const good = rows.find((e) => e.subject === 'Diag success')
+      assert.equal(fail?.sent, false)
+      assert.match(fail?.error, /535 Username and Password/)
+      assert.equal(good?.sent, true)
+    } finally {
+      setMailTransportForTests(null)
+      config.emailProvider = prev
+      config.smtpUser = ''
+    }
+  })
+
+  it('sends a test email on request, only to known people, and shows the real error', async () => {
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    const sent: Json[] = []
+    const prev = config.emailProvider
+    config.emailProvider = 'smtp'
+    config.smtpUser = 'sender@gmail.com'
+    const c = new Client()
+    try {
+      setMailTransportForTests({ sendMail: async (m) => { sent.push(m); return {} } })
+      const ok = await c.json('GET', '/api/health/deep?key=test-cron-secret&sendTo=admin@test.com')
+      assert.equal(ok.data.testEmail.sent, true)
+      assert.equal(sent.length, 1)
+
+      const stranger = await c.json('GET', '/api/health/deep?key=test-cron-secret&sendTo=stranger@evil.com')
+      assert.equal(stranger.data.testEmail.sent, false)
+      assert.equal(sent.length, 1, 'must not email unknown addresses')
+
+      setMailTransportForTests({ sendMail: async () => { throw new Error('Connection timeout') } })
+      const bad = await c.json('GET', '/api/health/deep?key=test-cron-secret&sendTo=admin@test.com')
+      assert.equal(bad.data.testEmail.sent, false)
+      assert.match(bad.data.testEmail.error, /Connection timeout/)
+
+      assert.equal((await c.json('GET', '/api/health/deep?key=wrong&sendTo=admin@test.com')).status, 404)
+    } finally {
+      setMailTransportForTests(null)
+      config.emailProvider = prev
+      config.smtpUser = ''
+    }
+  })
+})
