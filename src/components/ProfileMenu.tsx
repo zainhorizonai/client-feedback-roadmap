@@ -52,7 +52,7 @@ export function ProfileMenu({ projects = [], selectedId, onSelect, pending = {} 
   }, [open])
 
   if (!user) return null
-  const item = 'flex min-h-11 w-full items-center gap-2 rounded-control px-3 text-left font-semibold no-underline hover:bg-canvas md:min-h-9'
+  const item = 'flex min-h-11 w-full items-center gap-2 rounded-control px-3 text-left font-semibold no-underline hover:bg-subtle md:min-h-9'
 
   return (
     <div className="relative">
@@ -64,7 +64,7 @@ export function ProfileMenu({ projects = [], selectedId, onSelect, pending = {} 
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         aria-label={`Account menu for ${user.name}`}
-        className="flex min-h-11 items-center gap-2 rounded-control pl-1 pr-2 hover:bg-canvas md:min-h-10"
+        className="flex min-h-11 items-center gap-2 rounded-control pl-1 pr-2 hover:bg-subtle md:min-h-10"
       >
         <Avatar name={user.name} />
         <span className="hidden max-w-[10rem] truncate font-semibold md:inline">{user.name}</span>

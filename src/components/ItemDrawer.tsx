@@ -34,7 +34,7 @@ export function ItemDrawer({ item, onClose }: { item: RoadmapItem; onClose: () =
           <ul className="space-y-1.5">
             {linked.map((r) => (
               <li key={r!.id}>
-                <Link to={`/reports/${r!.id}`} className="flex items-center justify-between gap-2 rounded-control border border-line px-3 py-2 no-underline hover:bg-canvas">
+                <Link to={`/reports/${r!.id}`} className="flex items-center justify-between gap-2 rounded-control border border-line px-3 py-2 no-underline hover:bg-subtle">
                   <span className="min-w-0 truncate"><Mono className="text-sm text-muted">{r!.id}</Mono> {r!.title}</span><StatusBadge status={r!.status} />
                 </Link>
               </li>

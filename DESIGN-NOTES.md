@@ -89,3 +89,7 @@ switched on under Columns. A "project" in the interface is a client organisation
 | Console and network capture, session replay | Out of scope in the handoff. |
 
 The handoff notes that it does not establish that the name SEAM is available. Check that before using it publicly.
+
+## Dark glass restyle
+
+The interface now follows a dark, frosted-glass look: a dithered sky picture (`public/bg/`, generated, replaceable) behind a dark scrim, a black rounded frame with an icon-only rail for admins, a black top bar for clients, pill buttons and inputs, and a soft rainbow rim on the focused field. All colours, radii and fonts live in `src/styles/tokens.css`, so the look can be changed there. Text sits on a dark scrim or solid dark panel, never straight on the picture, to keep contrast. The Tracker stays a solid table for density. The SEAM mark and name are kept.

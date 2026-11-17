@@ -6,7 +6,7 @@ import { setStatus, updateFields, useReports, useReportsLoaded } from '../lib/st
 import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Report, type Severity, type Status } from '../lib/types'
 import { EditableCell } from '../components/EditableCell'
 import { ReportDrawer } from '../components/ReportDrawer'
-import { ProjectChips, ProjectFilter } from '../components/ProjectFilter'
+import { ProjectChips } from '../components/ProjectFilter'
 import { Button, EmptyState, fmtDate, Mono, PageHeader, Skeleton, StatusBadge } from '../components/ui'
 import { notify } from '../lib/toast'
 
@@ -129,7 +129,6 @@ export function AdminTracker() {
   return (
     <>
       <PageHeader
-        eyebrow={<span className="inline-block w-64 max-w-full"><ProjectFilter /></span>}
         title="Tracker"
         subtitle={loaded ? `${rows.length} of ${reports.filter((r) => matches(r.clientId)).length} reports${isAll ? ' in all projects' : ` in ${label}`}` : undefined}
         actions={
@@ -209,7 +208,7 @@ export function AdminTracker() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="h-10 hover:bg-canvas/60">
+                <tr key={r.id} className="h-10 hover:bg-subtle/60">
                   {visible('id') && <th scope="row" className={`${td} sticky left-0 z-[5] bg-surface px-2 text-left font-normal`}><Mono>{r.id}</Mono></th>}
                   {visible('createdAt') && <td className={`${td} whitespace-nowrap px-2`}><Mono>{fmtDate(r.createdAt)}</Mono></td>}
                   {visible('project') && <td className={`${td} whitespace-nowrap px-2`}>{r.clientName}</td>}

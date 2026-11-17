@@ -76,7 +76,7 @@ export function ClientHome() {
   const segment = <T extends string>(label: string, value: T, options: { id: T; label: string }[], on: (v: T) => void) => (
     <div role="group" aria-label={label} className="inline-flex rounded-control border border-control bg-surface p-0.5">
       {options.map((o) => (
-        <button key={o.id} type="button" onClick={() => on(o.id)} aria-pressed={value === o.id} className={`min-h-10 rounded-[.25rem] px-3 font-semibold md:min-h-8 ${value === o.id ? 'bg-forest text-cream' : 'text-ink hover:bg-canvas'}`}>{o.label}</button>
+        <button key={o.id} type="button" onClick={() => on(o.id)} aria-pressed={value === o.id} className={`min-h-10 rounded-full px-3 font-semibold md:min-h-8 ${value === o.id ? 'bg-white text-black' : 'text-ink hover:bg-subtle'}`}>{o.label}</button>
       ))}
     </div>
   )
@@ -135,8 +135,8 @@ export function ClientHome() {
             return (
               <li key={e.key}>
                 {e.reportId
-                  ? <Link to={`/reports/${e.reportId}`} className="flex flex-col gap-2 px-4 py-4 no-underline hover:bg-canvas sm:flex-row sm:items-center sm:gap-4">{body}</Link>
-                  : <button type="button" onClick={() => setOpenItem(e.item?.id ?? null)} className="flex w-full flex-col gap-2 px-4 py-4 text-left hover:bg-canvas sm:flex-row sm:items-center sm:gap-4">{body}</button>}
+                  ? <Link to={`/reports/${e.reportId}`} className="flex flex-col gap-2 px-4 py-4 no-underline hover:bg-subtle sm:flex-row sm:items-center sm:gap-4">{body}</Link>
+                  : <button type="button" onClick={() => setOpenItem(e.item?.id ?? null)} className="flex w-full flex-col gap-2 px-4 py-4 text-left hover:bg-subtle sm:flex-row sm:items-center sm:gap-4">{body}</button>}
               </li>
             )
           })}

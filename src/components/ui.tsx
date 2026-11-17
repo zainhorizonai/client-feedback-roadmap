@@ -7,11 +7,11 @@ import type { Kind, RoadmapState, Severity, Status } from '../lib/types'
 
 type Variant = 'primary' | 'secondary' | 'tertiary' | 'danger'
 const BUTTON_BASE =
-  'inline-flex items-center justify-center gap-2 rounded-control px-4 font-semibold no-underline select-none ' +
+  'inline-flex items-center justify-center gap-2 rounded-full px-5 font-semibold no-underline select-none ' +
   'min-h-11 md:min-h-9 disabled:cursor-not-allowed disabled:opacity-55'
 const BUTTON_VARIANT: Record<Variant, string> = {
   primary: 'bg-action text-on-action hover:bg-action-hover',
-  secondary: 'border border-control bg-surface text-ink hover:bg-canvas',
+  secondary: 'border border-control bg-surface text-ink hover:bg-subtle',
   tertiary: 'px-2 text-ink underline-offset-4 hover:underline',
   danger: 'border border-control bg-surface text-[var(--seam-error-fg)] hover:bg-[var(--seam-error-bg)]',
 }
@@ -199,18 +199,18 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
 
   return (
     <div className="fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-forest/40" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="absolute inset-y-0 right-0 flex w-full flex-col bg-surface shadow-2xl outline-none md:w-[min(100%,var(--seam-drawer-width))] md:border-l md:border-line"
+        className="absolute inset-y-0 right-0 flex w-full flex-col bg-[var(--seam-surface-solid)] shadow-2xl outline-none md:w-[min(100%,var(--seam-drawer-width))] md:rounded-l-[1.75rem] md:border-l md:border-line"
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-4 md:px-6">
           <h2 id={titleId} className="min-w-0 break-words font-semibold">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink md:h-9 md:w-9">
+          <button type="button" onClick={onClose} aria-label="Close" className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-subtle hover:text-ink md:h-9 md:w-9">
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
