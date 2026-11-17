@@ -15,23 +15,25 @@ interface Filters { q: string; kind: string; status: string; severity: string; d
 const NO_FILTERS: Filters = { q: '', kind: '', status: '', severity: '', days: '' }
 const SEV_RANK: Record<Severity, number> = { Blocker: 0, High: 1, Medium: 2, Low: 3 }
 
-interface ColumnDef { key: string; label: string; narrow: boolean; sort?: SortKey }
+interface ColumnDef { key: string; label: string; sort?: SortKey }
 const COLUMNS: ColumnDef[] = [
-  { key: 'id', label: 'ID', narrow: true, sort: 'id' },
-  { key: 'createdAt', label: 'Submitted', narrow: true, sort: 'createdAt' },
-  { key: 'project', label: 'Project', narrow: true },
-  { key: 'reporter', label: 'Reporter', narrow: false },
-  { key: 'kind', label: 'Type', narrow: true },
-  { key: 'title', label: 'Title', narrow: true, sort: 'title' },
-  { key: 'description', label: 'Description', narrow: false },
-  { key: 'video', label: 'Video', narrow: true },
-  { key: 'pageUrl', label: 'Page / URL', narrow: false },
-  { key: 'severity', label: 'Severity', narrow: true, sort: 'severity' },
-  { key: 'status', label: 'Status', narrow: true, sort: 'status' },
-  { key: 'resolution', label: 'Resolution video', narrow: false },
-  { key: 'resolvedAt', label: 'Resolved date', narrow: false },
+  { key: 'id', label: 'ID', sort: 'id' },
+  { key: 'createdAt', label: 'Submitted', sort: 'createdAt' },
+  { key: 'project', label: 'Project' },
+  { key: 'reporter', label: 'Reporter' },
+  { key: 'kind', label: 'Type' },
+  { key: 'title', label: 'Title', sort: 'title' },
+  { key: 'description', label: 'Description' },
+  { key: 'video', label: 'Video' },
+  { key: 'pageUrl', label: 'Page / URL' },
+  { key: 'severity', label: 'Severity', sort: 'severity' },
+  { key: 'status', label: 'Status', sort: 'status' },
+  { key: 'resolution', label: 'Resolution video' },
+  { key: 'resolvedAt', label: 'Resolved date' },
 ]
-const COLS_KEY = 'seam.tracker.columns'
+// Only the essentials show by default. The rest are one click away under Columns.
+const DEFAULT_COLUMNS = ['id', 'title', 'project', 'severity', 'status']
+const COLS_KEY = 'seam.tracker.columns.v2'
 const VIEWS_KEY = 'seam.tracker.views'
 
 interface SavedView { name: string; filters: Filters; sort: SortKey; dir: 'asc' | 'desc'; columns: string[] }
@@ -52,8 +54,7 @@ export function AdminTracker() {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [sort, setSort] = useState<SortKey>('createdAt')
   const [dir, setDir] = useState<'asc' | 'desc'>('desc')
-  // Lower-frequency columns start hidden on narrower screens. After that, the saved choice wins.
-  const [columns, setColumns] = useState<string[]>(() => loadJson<string[] | null>(COLS_KEY, null) ?? COLUMNS.filter((c) => window.innerWidth >= 1700 || c.narrow).map((c) => c.key))
+  const [columns, setColumns] = useState<string[]>(() => loadJson<string[] | null>(COLS_KEY, null) ?? DEFAULT_COLUMNS)
   const [views, setViews] = useState<SavedView[]>(() => loadJson(VIEWS_KEY, []))
   const [showColumns, setShowColumns] = useState(false)
   const [viewName, setViewName] = useState('')
@@ -215,18 +216,20 @@ export function AdminTracker() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="h-10 hover:bg-canvas/60">
+                <tr
+                  key={r.id}
+                  className="h-12 cursor-pointer hover:bg-canvas/60"
+                  // Clicking anywhere on the row opens the ticket, except on a control inside it (status, severity, links).
+                  onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button, a, input, textarea, label')) openReport(r.id) }}
+                >
                   {visible('id') && <th scope="row" className={`${td} sticky left-0 z-[5] bg-surface px-2 text-left font-normal`}><Mono>{r.id}</Mono></th>}
                   {visible('createdAt') && <td className={`${td} whitespace-nowrap px-2`}><Mono>{fmtDate(r.createdAt)}</Mono></td>}
                   {visible('project') && <td className={`${td} whitespace-nowrap px-2`}>{r.clientName}</td>}
                   {visible('reporter') && <td className={`${td} whitespace-nowrap px-2 text-muted`}>{r.reporterName}</td>}
                   {visible('kind') && <td className={`${td} whitespace-nowrap px-2`}>{r.kind}</td>}
                   {visible('title') && (
-                    <td className={`${td} min-w-[16rem] max-w-md`}>
-                      <div className="flex items-center gap-1">
-                        <div className="min-w-0 flex-1"><EditableCell value={r.title} label={`title of ${r.id}`} required onSave={(v) => updateFields(r.id, { title: v })} className="font-semibold" /></div>
-                        <Button variant="tertiary" className="!min-h-9 shrink-0" onClick={() => openReport(r.id)} aria-label={`Open ${r.id}`}>Open</Button>
-                      </div>
+                    <td className={`${td} min-w-[16rem] max-w-xl px-2`}>
+                      <button type="button" onClick={() => openReport(r.id)} className="block w-full truncate text-left font-semibold hover:underline" title={r.title}>{r.title}</button>
                     </td>
                   )}
                   {visible('description') && <td className={`${td} min-w-[16rem] max-w-md`}><EditableCell multiline value={r.description} label={`description of ${r.id}`} onSave={(v) => updateFields(r.id, { description: v })} /></td>}
