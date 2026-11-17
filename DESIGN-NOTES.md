@@ -56,6 +56,12 @@ These were asked for directly, so they replace the spec's version:
 - **Profile menu** top right for everyone signed in: initials, name, email, role, the projects they can switch between,
   Account and Sign out.
 
+- **Webcam recording, Loom-style.** The record control offers Screen, Screen and camera (the screen with the person's face
+  in a round bubble in a chosen corner) and Camera, with a countdown and a live self-view. The camera mode is also how phones
+  record, since they cannot share a screen. Screen and camera needs Chrome or Edge on a computer; other browsers are
+  offered Screen and Camera and told why. If the microphone or camera is blocked the person is told, and upload is always
+  available.
+
 ## Design defaults used (from the spec's own list)
 
 Breakpoints 768px and 1024px, default tracker columns, export scope, 224px sidebar and 480px drawer. Lower-frequency

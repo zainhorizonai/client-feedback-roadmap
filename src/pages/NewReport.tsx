@@ -17,8 +17,8 @@ const OPTIONS: { kind: Kind; icon: LucideIcon; hint: string; param: string }[] =
 ]
 
 const COPY: Record<Kind, { title: string; placeholder: string; detail: string; videoTitle: string; videoHint: string }> = {
-  Bug: { title: 'Report a bug', placeholder: 'For example: Save button does nothing', detail: 'What did you expect to happen?', videoTitle: 'Show us the problem', videoHint: 'A short screen recording is the fastest way for us to see it. You can talk while you record.' },
-  'UAT finding': { title: 'Report a UAT finding', placeholder: 'For example: Total is wrong on the invoice screen', detail: 'What did you expect to happen?', videoTitle: 'Show us what you found', videoHint: 'A short screen recording helps us repeat the test.' },
+  Bug: { title: 'Report a bug', placeholder: 'For example: Save button does nothing', detail: 'What did you expect to happen?', videoTitle: 'Show us the problem', videoHint: 'A short recording is the fastest way for us to see it. Show your screen, your camera or both, and talk us through it.' },
+  'UAT finding': { title: 'Report a UAT finding', placeholder: 'For example: Total is wrong on the invoice screen', detail: 'What did you expect to happen?', videoTitle: 'Show us what you found', videoHint: 'A short recording helps us repeat the test. Show your screen, your camera or both.' },
   'Feature request': { title: 'Request a feature', placeholder: 'For example: Export reports to CSV', detail: 'What would this help you do?', videoTitle: 'Show us what you mean (optional)', videoHint: 'Only if it helps. Text alone is fine.' },
   Question: { title: 'Ask a question', placeholder: 'For example: How do I add a new user?', detail: 'Tell us more', videoTitle: 'Show us (optional)', videoHint: 'Only if it helps. Text alone is fine.' },
 }
