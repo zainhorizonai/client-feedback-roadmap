@@ -133,7 +133,7 @@ function ItemEditor({ item, defaultClientId, onClose, onOpenReport }: { item: Ro
             {candidates.map((r) => (
               <li key={r.id} className="flex items-center gap-2 rounded-control px-1 py-1 hover:bg-canvas">
                 <label className="flex min-h-9 min-w-0 flex-1 cursor-pointer items-center gap-2">
-                  <input type="checkbox" checked={d.reportIds.includes(r.id)} onChange={() => toggle(r.id)} className="h-4 w-4 accent-[var(--seam-terracotta)]" />
+                  <input type="checkbox" checked={d.reportIds.includes(r.id)} onChange={() => toggle(r.id)} className="h-4 w-4 accent-[var(--seam-primary)]" />
                   <Mono className="shrink-0 text-sm">{r.id}</Mono><span className="truncate">{r.title}</span>
                 </label>
                 <StatusBadge status={r.status} />
@@ -144,7 +144,7 @@ function ItemEditor({ item, defaultClientId, onClose, onOpenReport }: { item: Ro
         </fieldset>
 
         <label className="flex cursor-pointer items-start gap-3 rounded-card border border-line bg-subtle/40 p-3">
-          <input type="checkbox" checked={d.published} onChange={(e) => setD({ ...d, published: e.target.checked })} className="mt-1 h-4 w-4 accent-[var(--seam-terracotta)]" />
+          <input type="checkbox" checked={d.published} onChange={(e) => setD({ ...d, published: e.target.checked })} className="mt-1 h-4 w-4 accent-[var(--seam-primary)]" />
           <span>
             <span className="block font-semibold">Publish to the client</span>
             <span className="block text-sm text-muted">{d.published ? 'The client can see this item now. They will not see linked reports, reporter names or notes.' : 'Keep this as a draft. Only your team can see it.'}</span>

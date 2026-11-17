@@ -10,12 +10,14 @@ import { CLIENT_STATUS, SEVERITIES, STATUSES, type Kind, type RoadmapState, type
 type Variant = 'primary' | 'secondary' | 'tertiary' | 'danger'
 const BUTTON_BASE =
   'inline-flex items-center justify-center gap-2 rounded-control px-4 font-semibold no-underline select-none ' +
-  'min-h-9 transition-[background-color,box-shadow,transform] duration-150 enabled:active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-55'
+  'min-h-[2.375rem] transition-[background-color,box-shadow,transform,color,border-color] duration-150 ' +
+  'enabled:hover:-translate-y-px enabled:active:translate-y-0 enabled:active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-55'
+// Small 32px, medium 38px (the default), large 44px: pass !min-h-8 or !min-h-11 through className.
 const BUTTON_VARIANT: Record<Variant, string> = {
-  primary: 'bg-action text-on-action hover:bg-action-hover',
-  secondary: 'border border-control bg-surface text-ink hover:bg-canvas',
-  tertiary: 'px-2 text-ink underline-offset-4 hover:underline',
-  danger: 'border border-control bg-surface text-[var(--seam-error-fg)] hover:bg-[var(--seam-error-bg)]',
+  primary: 'bg-action text-on-action hover:bg-action-hover enabled:hover:shadow-[var(--seam-shadow-glow)]',
+  secondary: 'border border-control bg-transparent text-ink hover:bg-subtle',
+  tertiary: 'px-2 text-ink hover:bg-subtle hover:text-primary',
+  danger: 'border border-[#ef4444] bg-transparent text-[var(--seam-error-fg)] hover:bg-[var(--seam-error-bg)]',
 }
 export const buttonClass = (variant: Variant = 'primary', extra = '') => `${BUTTON_BASE} ${BUTTON_VARIANT[variant]} ${extra}`
 
@@ -56,7 +58,7 @@ export const SeverityBadge = ({ severity }: { severity: Severity }) => <span cla
 const STAGE_TONE: Record<RoadmapState, string> = { 'Under review': 'badge-neutral', Planned: 'badge-info', 'In progress': 'badge-warning', Done: 'badge-success' }
 export const StageBadge = ({ stage }: { stage: RoadmapState }) => <span className={`badge ${STAGE_TONE[stage]}`}>{stage}</span>
 export const KindTag = ({ kind }: { kind: Kind }) => (
-  <span className="inline-block rounded-control border border-line bg-surface px-2 py-0.5 text-[.8125rem] leading-5 text-muted">{kind}</span>
+  <span className="inline-block rounded-tag bg-subtle px-2 py-0.5 text-xs leading-5 text-muted">{kind}</span>
 )
 
 // ---------- Pill select: a coloured label you click to change, instead of a form dropdown ----------
@@ -140,7 +142,7 @@ export function PillSelect<T extends string>({ value, options, onChange, label, 
           // status would also open the ticket.
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', left: Math.min(at.x, window.innerWidth - 232), top: at.up ? undefined : at.y, bottom: at.up ? window.innerHeight - at.y : undefined }}
-          className="anim-pop-sm z-50 w-56 rounded-card border border-line bg-surface p-1.5 shadow-seam-2"
+          className="anim-pop-sm z-50 w-56 rounded-panel border border-line bg-surface p-1.5 shadow-float"
         >
           {options.map((o) => (
             <li key={o} role="option" aria-selected={o === value} tabIndex={-1} onClick={() => pick(o)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(o) } }}
@@ -226,7 +228,6 @@ export function PageHeader({ eyebrow, title, subtitle, actions }: { eyebrow?: Re
 export function EmptyState({ icon, title, children, action }: { icon?: ReactNode; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="rounded-card border border-dashed border-control bg-surface px-6 py-12 text-center">
-      <SeamDivider className="mx-auto mb-5 !h-2 !w-16 opacity-70" />
       {icon && <div className="mx-auto mb-3 flex justify-center text-muted" aria-hidden="true">{icon}</div>}
       <h2 className="font-semibold">{title}</h2>
       {children && <p className="mx-auto mt-1 max-w-md text-muted">{children}</p>}
@@ -255,18 +256,9 @@ export function SeamProgress({ fraction, label }: { fraction: number; label: str
       <svg viewBox="0 0 120 12" aria-hidden="true" className="h-3 w-full" preserveAspectRatio="none">
         <defs><clipPath id={clip}><rect x="0" y="0" height="12" width={f * 120} style={{ transition: 'width .25s ease-out' }} /></clipPath></defs>
         <path d={line} fill="none" stroke="var(--seam-border)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
-        <path d={line} fill="none" stroke="var(--seam-terracotta)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" clipPath={`url(#${clip})`} />
+        <path d={line} fill="none" stroke="var(--seam-primary)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" clipPath={`url(#${clip})`} />
       </svg>
     </div>
-  )
-}
-
-/** The stepped seam from the logo, used sparingly as a brand divider on sign-in and email headers. */
-export function SeamDivider({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 120 12" role="presentation" aria-hidden="true" className={`h-3 w-full ${className}`} preserveAspectRatio="none">
-      <path d="M0 10H24V6H48V2H72V6H96V10H120" fill="none" stroke="var(--seam-terracotta)" strokeWidth="2.5" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
-    </svg>
   )
 }
 
@@ -367,7 +359,7 @@ export function Modal({ title, onClose, children, eyebrow, actions, size = 'md' 
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`anim-modal relative flex w-full flex-col overflow-hidden bg-surface shadow-seam-3 outline-none md:rounded-modal ${big ? 'h-[100dvh] md:h-[min(90vh,60rem)] md:max-w-6xl' : 'h-[100dvh] md:h-auto md:max-h-[90vh] md:max-w-xl'}`}
+        className={`anim-modal relative flex w-full flex-col overflow-hidden bg-surface shadow-dialog outline-none md:rounded-modal ${big ? 'h-[100dvh] md:h-[min(90vh,60rem)] md:max-w-6xl' : 'h-[100dvh] md:h-auto md:max-h-[90vh] md:max-w-xl'}`}
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3 md:px-6 md:py-4">
           <div className="min-w-0">
@@ -418,10 +410,10 @@ export function Block({ title, children, tone = 'plain', hint }: { title: string
 export function StatTile({ label, hint, value, active, onClick, attention = false }: { label: string; hint?: string; value: ReactNode; active?: boolean; onClick?: () => void; attention?: boolean }) {
   const zero = value === 0 || value === '0'
   const hot = attention && !zero && typeof value !== 'string'
-  const cls = `relative rounded-card border p-4 text-left transition-colors ${active ? 'border-forest ring-2 ring-forest' : 'border-line'} ${hot && !active ? 'bg-[var(--seam-warning-bg)]' : 'bg-surface'} ${onClick ? 'hover:border-control' : ''}`
+  const cls = `relative rounded-card border p-4 text-left ${active ? 'border-primary ring-2 ring-primary' : 'border-line'} ${hot && !active ? 'bg-[var(--seam-warning-bg)]' : 'bg-surface'} ${onClick ? 'card-hover' : ''}`
   const inner = (
     <>
-      {onClick && <ListFilter className={`absolute right-3 top-3 h-4 w-4 ${active ? 'text-forest' : 'text-muted/60'}`} aria-hidden="true" />}
+      {onClick && <ListFilter className={`absolute right-3 top-3 h-4 w-4 ${active ? 'text-primary' : 'text-muted/60'}`} aria-hidden="true" />}
       <span className={`block text-3xl font-semibold tabular-nums ${zero ? 'text-muted/60' : ''}`}>{value}</span>
       <span className={`block font-semibold ${zero ? 'text-muted' : ''}`}>{label}</span>
       {hint && <span className="block text-sm text-muted">{hint}</span>}
@@ -435,7 +427,7 @@ export function Segmented<T extends string>({ label, value, options, onChange }:
   return (
     <div role="group" aria-label={label} className="inline-flex rounded-control border border-control bg-surface p-0.5">
       {options.map((o) => (
-        <button key={o.id} type="button" onClick={() => onChange(o.id)} aria-pressed={value === o.id} className={`min-h-8 rounded-[.375rem] px-3 font-semibold transition-colors ${value === o.id ? 'bg-forest text-cream' : 'text-ink hover:bg-canvas'}`}>{o.label}</button>
+        <button key={o.id} type="button" onClick={() => onChange(o.id)} aria-pressed={value === o.id} className={`min-h-8 rounded-tag px-3 font-semibold transition-colors ${value === o.id ? 'bg-primary text-white' : 'text-ink hover:bg-subtle'}`}>{o.label}</button>
       ))}
     </div>
   )

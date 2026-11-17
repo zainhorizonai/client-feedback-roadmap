@@ -4,10 +4,19 @@
 /* The SEAM tokens (tokens.css) are the source of truth. This maps them onto Tailwind utilities. */
 @theme inline {
   --font-sans: var(--seam-font);
+  --font-display: var(--seam-font-display);
   --font-mono: var(--seam-font-mono);
+  /* Genesis type scale: body 15, small 13, caption 12, subhead 24. */
+  --text-base: .9375rem; --text-base--line-height: 1.55;
+  --text-sm: .8125rem; --text-sm--line-height: 1.5;
+  --text-xs: .75rem; --text-xs--line-height: 1.4;
+  --text-xl: 1.5rem; --text-xl--line-height: 1.25;
+  /* UI text is regular and medium. "Semibold" in a class name means medium here; headings are bold in CSS below. */
+  --font-weight-semibold: 500;
 
+  --color-primary: var(--seam-primary);
+  --color-primary-hover: var(--seam-primary-hover);
   --color-forest: var(--seam-forest);
-  --color-terracotta: var(--seam-terracotta);
   --color-cream: var(--seam-cream);
   --color-sand: var(--seam-sand);
 
@@ -23,39 +32,42 @@
   --color-on-action: var(--seam-on-action);
   --color-focus: var(--seam-focus);
 
+  --radius-tag: var(--seam-radius-tag);
   --radius-control: var(--seam-radius-control);
+  --radius-panel: var(--seam-radius-panel);
   --radius-card: var(--seam-radius-card);
   --radius-modal: var(--seam-radius-modal);
-  --shadow-seam-1: var(--seam-shadow-1);
-  --shadow-seam-2: var(--seam-shadow-2);
-  --shadow-seam-3: var(--seam-shadow-3);
-  --spacing-sidebar: var(--seam-sidebar-width);
+  --shadow-float: var(--seam-shadow-float);
+  --shadow-dialog: var(--seam-shadow-dialog);
+  --shadow-hover: var(--seam-shadow-hover);
   --spacing-drawer: var(--seam-drawer-width);
 }
 
 html, body, #root { min-height: 100%; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; accent-color: var(--seam-primary); }
 body {
   background: var(--seam-canvas);
   color: var(--seam-text);
-  font: var(--seam-type-body-mobile);
+  font: var(--seam-type-body);
   -webkit-font-smoothing: antialiased;
 }
-@media (min-width: 768px) { body { font: var(--seam-type-body); } }
+::selection { background: var(--seam-ring); }
 
-/* One focus treatment everywhere, with a variant for dark surfaces. */
+/* Focus: a clear 2px indigo outline on anything you can reach by keyboard. Text fields use the spec's soft ring instead. */
 :focus-visible { outline: 2px solid var(--seam-focus); outline-offset: 2px; }
-.on-dark :focus-visible { outline-color: var(--seam-focus-on-dark); }
 /* A dialog is focused by code when it opens so keyboards start inside it. That is not a control, so no ring. */
 [role="dialog"]:focus-visible { outline: none; }
 
-h1 { font: var(--seam-type-page-mobile); }
-h2 { font: var(--seam-type-section); }
-@media (min-width: 768px) { h1 { font: var(--seam-type-page); } }
+/* Headings: General Sans, bold, tight. Block titles inside a panel (h3) are quiet labels in the body font. */
+h1 { font: var(--seam-type-page-mobile); letter-spacing: -.03em; }
+h2 { font: var(--seam-type-section); letter-spacing: -.03em; }
+@media (min-width: 768px) { h1 { font: var(--seam-type-page); letter-spacing: -.04em; } }
+.caps { font-size: .6875rem; line-height: 1.2; letter-spacing: .08em; text-transform: uppercase; font-weight: 500; color: var(--seam-text-muted); }
 
 @layer components {
-  .badge { display: inline-flex; align-items: center; gap: .375rem; border-radius: var(--seam-radius-pill); padding: .125rem .625rem; font-size: .8125rem; line-height: 1.25rem; font-weight: 600; white-space: nowrap; }
-  .badge::before { content: ""; width: .4375rem; height: .4375rem; border-radius: 999px; background: currentColor; }
+  /* Status chips: a pill, 12px, with a dot so colour never travels alone. */
+  .badge { display: inline-flex; align-items: center; gap: .375rem; border-radius: var(--seam-radius-pill); padding: .25rem .75rem; font-size: .75rem; line-height: 1rem; font-weight: 500; white-space: nowrap; }
+  .badge::before { content: ""; width: .375rem; height: .375rem; border-radius: 999px; background: currentColor; }
   .badge-neutral { background: var(--seam-neutral-bg); color: var(--seam-neutral-fg); }
   .badge-info { background: var(--seam-info-bg); color: var(--seam-info-fg); }
   .badge-warning { background: var(--seam-warning-bg); color: var(--seam-warning-fg); }
@@ -63,22 +75,41 @@ h2 { font: var(--seam-type-section); }
   .badge-error { background: var(--seam-error-bg); color: var(--seam-error-fg); }
   .badge-success { background: var(--seam-success-bg); color: var(--seam-success-fg); }
 
+  /* Inputs: 1px border, 6px radius, 10px by 14px padding, 14px text. Focus turns the border indigo with a soft ring. */
   .input {
     width: 100%; background: var(--seam-surface); color: var(--seam-text);
     border: 1px solid var(--seam-border-control); border-radius: var(--seam-radius-control);
-    min-height: var(--seam-touch-target); padding: .5rem .75rem; font: inherit;
+    min-height: var(--seam-control-height); padding: .625rem .875rem; font: inherit; font-size: .875rem; line-height: 1.25rem;
+    transition: border-color .15s, box-shadow .15s;
   }
-  .input { min-height: var(--seam-control-height); }
-  .input::placeholder { color: #6f7a6d; }
-  .input[aria-invalid="true"] { border-color: var(--seam-error-fg); }
+  .input::placeholder { color: var(--seam-neutral); }
+  .input:focus-visible { outline: none; border-color: var(--seam-primary); box-shadow: 0 0 0 3px var(--seam-ring); }
+  .input[aria-invalid="true"] { border-color: #ef4444; }
+  .input[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 3px rgba(239, 68, 68, .15); }
   textarea.input { min-height: 5rem; }
+  select.input { padding-block: .5rem; }
   /* A value that reads as plain text until you point at it or focus it: used for ticket properties. */
-  .input-ghost { width: 100%; min-height: 2.25rem; background: transparent; color: var(--seam-text); border: 1px solid transparent; border-radius: var(--seam-radius-control); padding: .25rem .5rem; margin-left: -.5rem; font: inherit; font-weight: 600; cursor: pointer; }
+  .input-ghost { width: 100%; min-height: 2.25rem; background: transparent; color: var(--seam-text); border: 1px solid transparent; border-radius: var(--seam-radius-control); padding: .25rem .5rem; margin-left: -.5rem; font: inherit; font-weight: 500; cursor: pointer; }
   .input-ghost:hover, .input-ghost:focus-visible { border-color: var(--seam-border-control); background: var(--seam-surface); }
+  .input-ghost:focus-visible { outline: none; border-color: var(--seam-primary); box-shadow: 0 0 0 3px var(--seam-ring); }
+
+  /* Cards rest flat. When they can be pressed they lift 2px and gain a soft shadow. */
+  .card-hover { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+  .card-hover:hover { transform: translateY(-2px); box-shadow: var(--seam-shadow-hover); }
 }
 
-/* Cards rest on a faint shadow, so they sit on the page instead of looking drawn on it. */
-.rounded-card.bg-surface { box-shadow: var(--seam-shadow-1); }
+/* Checkboxes are round, 20px, grey until checked, then indigo with a white tick. They also serve as switches. */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; flex-shrink: 0; width: 1.25rem; height: 1.25rem; border-radius: 999px;
+  background: #e4e4e7 center / .75rem no-repeat; border: 0; cursor: pointer; transition: background-color .15s;
+}
+input[type="checkbox"]:hover { background-color: #d4d4d8; }
+input[type="checkbox"]:checked {
+  background-color: var(--seam-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.5l2.5 2.5 4.5-5'/%3E%3C/svg%3E");
+}
+input[type="checkbox"]:checked:hover { background-color: var(--seam-primary-hover); }
+input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Motion: short and quiet. Things fade and rise into place; nothing bounces. Reduced motion turns it all off below. */
 @keyframes seam-fade { from { opacity: 0 } to { opacity: 1 } }
@@ -94,6 +125,8 @@ h2 { font: var(--seam-type-section); }
 @media (pointer: coarse) {
   button, select, summary, [role="option"], [role="menuitem"], input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]) { min-height: 2.75rem; }
   button[aria-label] { min-width: 2.75rem; }
+  /* Browsers on phones zoom in on text smaller than 16px when a field is focused. */
+  .input, .input-ghost { font-size: 1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

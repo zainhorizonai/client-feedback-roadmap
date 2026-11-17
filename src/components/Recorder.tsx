@@ -284,9 +284,9 @@ export function Recorder({ blob, onChange, maxMb }: Props) {
               <legend className="mb-2 font-semibold">How do you want to record?</legend>
               <div className={`grid gap-2 ${available.length === 3 ? 'sm:grid-cols-3' : available.length === 2 ? 'sm:grid-cols-2' : ''}`}>
                 {available.map((m) => (
-                  <label key={m.id} className={`flex cursor-pointer flex-col rounded-card border p-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${mode === m.id ? 'border-forest bg-surface ring-2 ring-forest' : 'border-line bg-surface hover:border-control'}`}>
+                  <label key={m.id} className={`flex cursor-pointer flex-col rounded-card border p-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${mode === m.id ? 'border-primary bg-surface ring-2 ring-primary' : 'border-line bg-surface hover:border-control'}`}>
                     <input type="radio" name="record-mode" value={m.id} checked={mode === m.id} onChange={() => setMode(m.id)} className="sr-only" />
-                    <m.icon className={`h-5 w-5 ${mode === m.id ? 'text-forest' : 'text-muted'}`} aria-hidden="true" />
+                    <m.icon className={`h-5 w-5 ${mode === m.id ? 'text-primary' : 'text-muted'}`} aria-hidden="true" />
                     <span className="mt-2 font-semibold">{m.label}</span>
                     <span className="text-sm text-muted">{m.hint}</span>
                   </label>
@@ -296,7 +296,7 @@ export function Recorder({ blob, onChange, maxMb }: Props) {
 
             <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
               <button type="button" onClick={() => setMic((n) => !n)} aria-pressed={mic} className="inline-flex min-h-9 items-center gap-2 rounded-control text-sm text-muted hover:text-ink">
-                {mic ? <Mic className="h-4 w-4 text-forest" aria-hidden="true" /> : <MicOff className="h-4 w-4" aria-hidden="true" />}
+                {mic ? <Mic className="h-4 w-4 text-primary" aria-hidden="true" /> : <MicOff className="h-4 w-4" aria-hidden="true" />}
                 {mic ? 'Microphone on' : 'Microphone off'}
               </button>
               {mode === 'both' && (

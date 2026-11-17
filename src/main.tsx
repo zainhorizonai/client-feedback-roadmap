@@ -1,11 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-// Fonts are bundled, so nothing is requested from a third party. The CSS stack falls back to system fonts.
-import '@fontsource/instrument-sans/400.css'
-import '@fontsource/instrument-sans/500.css'
-import '@fontsource/instrument-sans/600.css'
-import '@fontsource/ibm-plex-mono/400.css'
-import '@fontsource/ibm-plex-mono/500.css'
+// DM Sans (body) and JetBrains Mono (code) are bundled. General Sans (headings) loads from Fontshare in index.html, and
+// headings fall back to bold DM Sans until it arrives.
+import '@fontsource/dm-sans/400.css'
+import '@fontsource/dm-sans/500.css'
+import '@fontsource/dm-sans/700.css'
+import '@fontsource/jetbrains-mono/400.css'
 import './index.css'
 import App from './App.tsx'
 

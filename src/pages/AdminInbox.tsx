@@ -65,7 +65,7 @@ export function AdminInbox() {
           {queue.map((r) => (
             <li
               key={r.id}
-              className="cursor-pointer rounded-card border border-line bg-surface p-4 hover:border-control"
+              className="card-hover cursor-pointer rounded-card border border-line bg-surface p-4"
               onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button, a, input, textarea, label')) setParams({ report: r.id }, { replace: true }) }}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">

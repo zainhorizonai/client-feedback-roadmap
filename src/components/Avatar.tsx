@@ -4,9 +4,9 @@ export function initials(name: string) {
   return ((parts[0][0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
 
-export function Avatar({ name, size = 'md', tone = 'dark' }: { name: string; size?: 'md' | 'lg'; tone?: 'dark' | 'light' }) {
+export function Avatar({ name, size = 'md' }: { name: string; size?: 'md' | 'lg' }) {
   return (
-    <span aria-hidden="true" className={`flex shrink-0 items-center justify-center rounded-full font-semibold ${tone === 'dark' ? 'bg-forest text-cream' : 'bg-cream text-forest'} ${size === 'lg' ? 'h-14 w-14 text-lg' : 'h-9 w-9 text-sm'}`}>
+    <span aria-hidden="true" className={`flex shrink-0 items-center justify-center rounded-full bg-forest font-medium text-cream ${size === 'lg' ? 'h-14 w-14 text-lg' : 'h-8 w-8 text-xs'}`}>
       {initials(name)}
     </span>
   )

@@ -125,3 +125,16 @@ The handoff notes that it does not establish that the name SEAM is available. Ch
 - **Touch:** on any touch screen (`pointer: coarse`), including tablets, every control is at least 44px, whatever the window width. With a mouse, controls stay compact.
 - **Brand line:** the logo's stepped line appears in empty states and draws itself as an upload progresses.
 - **Not done:** dark mode, and a closing animation for dialogs.
+
+## Genesis design system
+
+SEAM now follows the Genesis design system (DM Sans body, General Sans headings, JetBrains Mono for IDs, indigo for anything interactive). All values live in `src/styles/tokens.css`. The SEAM name and logo are unchanged.
+
+- **Layout:** one sticky 56px top bar for both roles (logo, project switcher, modules, main action, avatar menu) with a hamburger menu below 1024px. The left sidebar is gone. Content is capped at 1280px.
+- **Where it departs from the spec, on purpose:**
+  - Field and menu borders are one step darker than the spec's `#E8E8EC` (`#CFCFD6`), and keyboard focus is a 2px indigo outline (text fields use the spec's soft ring), because the spec values are too faint to see.
+  - Fields use 16px text on touch screens, so phones do not zoom in when one is focused.
+  - Status chips use soft fills with darker text (not the raw success, warning and error colours) so they stay readable.
+  - Headings are bold (700) and UI text is regular and medium, which is three weights, not two.
+- **Not included:** dark mode, the global search (⌘K) and the interactive dot grid.
+- **Font loading:** General Sans loads from Fontshare (`index.html`), the only third-party request. Until it arrives, headings use bold DM Sans.

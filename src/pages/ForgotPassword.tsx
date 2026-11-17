@@ -45,7 +45,7 @@ export function ForgotPassword() {
     <AuthLayout>
       {sent ? (
         <div className="text-center" aria-live="polite">
-          <Mail className="mx-auto h-9 w-9 text-forest" aria-hidden="true" />
+          <Mail className="mx-auto h-9 w-9 text-primary" aria-hidden="true" />
           <h1 className="mt-3 font-semibold">Check your email</h1>
           <p className="mt-2 text-muted">If <strong className="text-ink">{email}</strong> has an account, we sent a link to set your password. It works once.</p>
           {devLink && <a href={devLink} className="mt-4 block text-sm font-semibold underline">Open the link (local development only)</a>}

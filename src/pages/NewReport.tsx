@@ -148,9 +148,9 @@ export function NewReport() {
           <legend className="mb-2 font-semibold">What are you sending us?</legend>
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
             {OPTIONS.map((o) => (
-              <label key={o.kind} className={`relative flex cursor-pointer flex-col rounded-card border p-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${kind === o.kind ? 'border-forest bg-surface ring-2 ring-forest' : 'border-line bg-surface hover:border-control'}`}>
+              <label key={o.kind} className={`relative flex cursor-pointer flex-col rounded-card border p-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${kind === o.kind ? 'border-primary bg-surface ring-2 ring-primary' : 'border-line bg-surface hover:border-control'}`}>
                 <input type="radio" name="kind" value={o.kind} checked={kind === o.kind} onChange={() => setKind(o.kind)} className="sr-only" />
-                <o.icon className={`h-5 w-5 ${kind === o.kind ? 'text-forest' : 'text-muted'}`} aria-hidden="true" />
+                <o.icon className={`h-5 w-5 ${kind === o.kind ? 'text-primary' : 'text-muted'}`} aria-hidden="true" />
                 <span className="mt-2 font-semibold">{o.kind}</span>
                 <span className="text-sm text-muted">{o.hint}</span>
               </label>
@@ -186,7 +186,7 @@ export function NewReport() {
           )}
           {pageCtx && (
             <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line bg-surface p-3">
-              <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--seam-terracotta)]" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
+              <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--seam-primary)]" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
               <span><span className="font-semibold">Include what the page logged</span><span className="block text-sm text-muted">{pageCtx.logs?.length ?? 0} console {(pageCtx.logs?.length ?? 0) === 1 ? 'message' : 'messages'} and {pageCtx.network?.length ?? 0} failed {(pageCtx.network?.length ?? 0) === 1 ? 'request' : 'requests'} from the page you were on. Only our team sees them.</span></span>
             </label>
           )}
@@ -198,7 +198,7 @@ export function NewReport() {
           </Field>
           {hasSeverity(kind) && (
             <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line bg-surface p-3">
-              <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--seam-terracotta)]" checked={blocking} onChange={(e) => setBlocking(e.target.checked)} />
+              <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--seam-primary)]" checked={blocking} onChange={(e) => setBlocking(e.target.checked)} />
               <span><span className="font-semibold">This is stopping us from working</span><span className="block text-sm text-muted">Tick it if we should look at this first.</span></span>
             </label>
           )}

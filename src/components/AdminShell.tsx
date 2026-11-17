@@ -22,5 +22,5 @@ export function AdminShell() {
   // New reports in the projects being shown, so the Inbox says how much is waiting.
   const waiting = reports.filter((r) => r.status === 'New' && matches(r.clientId)).length
   if (!user) return null
-  return <AppShell home="/admin/inbox" nav={NAV(waiting)} switcherLabel="Projects" switcher={<ProjectFilter tone="dark" />} />
+  return <AppShell home="/admin/inbox" nav={NAV(waiting)} switcherLabel="Projects" switcher={<ProjectFilter />} />
 }

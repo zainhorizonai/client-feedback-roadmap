@@ -36,7 +36,7 @@ export function RoadmapBoard({ items, states, mode, onOpen, onMove, showProject 
               setOver(null); setDragging(null)
               if (item && item.state !== state) onMove?.(item, state)
             } : undefined}
-            className={`rounded-card p-3 ${over === state ? 'bg-subtle ring-2 ring-forest' : 'bg-subtle/50'}`}
+            className={`rounded-card p-3 ${over === state ? 'bg-subtle ring-2 ring-primary' : 'bg-subtle/50'}`}
           >
             <h2 id={`col-${state}`} className="mb-3 flex items-center justify-between px-1 font-semibold">
               {state}

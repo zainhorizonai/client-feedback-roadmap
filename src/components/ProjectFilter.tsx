@@ -25,7 +25,7 @@ export function ProjectFilter({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
   }, [open])
 
   const shown = projects.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()))
-  const dark = tone === 'dark'
+  const dark = false && tone === 'dark'
 
   return (
     <div className="relative">
@@ -44,7 +44,7 @@ export function ProjectFilter({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
       </button>
 
       {open && (
-        <div id={panelId} ref={panel} role="dialog" aria-label="Choose projects to show" className="absolute left-0 z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] anim-pop-sm rounded-card border border-line bg-surface p-3 text-ink shadow-seam-2">
+        <div id={panelId} ref={panel} role="dialog" aria-label="Choose projects to show" className="absolute left-0 z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] anim-pop-sm rounded-card border border-line bg-surface p-3 text-ink shadow-float">
           <div className="mb-2 flex items-center justify-between">
             <p className="font-semibold">Show these projects</p>
             <button type="button" onClick={showAll} disabled={isAll} className="text-sm font-semibold underline disabled:cursor-default disabled:no-underline disabled:opacity-50">Show all</button>
@@ -57,7 +57,7 @@ export function ProjectFilter({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
                 return (
                   <li key={p.id} className="flex items-center gap-1 rounded-control hover:bg-canvas">
                     <label className="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2">
-                      <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="h-4 w-4 shrink-0 accent-[var(--seam-terracotta)]" />
+                      <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="h-4 w-4 shrink-0 " />
                       <span className="min-w-0 flex-1 truncate">{p.name}</span>
                       {p.openCount ? <span className="shrink-0 text-sm text-muted">{p.openCount} open</span> : null}
                     </label>
@@ -83,9 +83,9 @@ export function ProjectChips() {
     <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Projects shown">
       <span className="text-sm text-muted">Showing</span>
       {projects.filter((p) => selectedIds.includes(p.id)).map((p) => (
-        <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-forest py-1 pl-3 pr-1 text-sm font-semibold text-cream">
+        <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-primary py-1 pl-3 pr-1 text-sm font-medium text-white">
           {p.name}
-          <button type="button" onClick={() => toggle(p.id)} aria-label={`Stop showing ${p.name}`} className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-cream/20">×</button>
+          <button type="button" onClick={() => toggle(p.id)} aria-label={`Stop showing ${p.name}`} className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-white/20">×</button>
         </span>
       ))}
       <button type="button" onClick={showAll} className="text-sm font-semibold underline">Show all projects</button>

@@ -167,7 +167,7 @@ export function AdminTracker() {
           <div className="grid gap-x-6 gap-y-1 sm:grid-cols-3">
             {COLUMNS.map((c) => (
               <label key={c.key} className="flex min-h-9 cursor-pointer items-center gap-2">
-                <input type="checkbox" className="h-4 w-4 accent-[var(--seam-terracotta)]" checked={visible(c.key)} disabled={c.key === 'id' || c.key === 'title'}
+                <input type="checkbox" className="h-4 w-4 accent-[var(--seam-primary)]" checked={visible(c.key)} disabled={c.key === 'id' || c.key === 'title'}
                   onChange={() => setColumns((cs) => (cs.includes(c.key) ? cs.filter((k) => k !== c.key) : [...cs, c.key]))} />
                 {c.label}
               </label>
@@ -246,7 +246,7 @@ export function AdminTracker() {
                 {COLUMNS.filter((c) => visible(c.key)).map((c) => (
                   <th key={c.key} scope="col" aria-sort={c.sort && sort === c.sort ? (dir === 'asc' ? 'ascending' : 'descending') : undefined} className={`${th} ${c.key === 'id' ? 'left-0 z-20' : ''}`}>
                     {c.key === 'id' && (
-                      <input type="checkbox" className="mr-2 h-4 w-4 align-middle accent-[var(--seam-terracotta)]" aria-label="Select all shown" checked={rows.length > 0 && rows.every((r) => picked.has(r.id))}
+                      <input type="checkbox" className="mr-2 h-4 w-4 align-middle accent-[var(--seam-primary)]" aria-label="Select all shown" checked={rows.length > 0 && rows.every((r) => picked.has(r.id))}
                         onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
                     )}
                     {c.sort ? (
@@ -266,7 +266,7 @@ export function AdminTracker() {
                   // Clicking anywhere on the row opens the ticket, except on a control inside it (status, severity, links).
                   onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button, a, input, textarea, label')) openReport(r.id) }}
                 >
-                  {visible('id') && <th scope="row" className={`${td} sticky left-0 z-[5] bg-surface px-2 text-left font-normal`}><label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[var(--seam-terracotta)]" aria-label={`Select ${r.id}`} checked={picked.has(r.id)} onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(r.id); else n.delete(r.id); return n })} /><Mono>{r.id}</Mono></label></th>}
+                  {visible('id') && <th scope="row" className={`${td} sticky left-0 z-[5] bg-surface px-2 text-left font-normal`}><label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[var(--seam-primary)]" aria-label={`Select ${r.id}`} checked={picked.has(r.id)} onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(r.id); else n.delete(r.id); return n })} /><Mono>{r.id}</Mono></label></th>}
                   {visible('createdAt') && <td className={`${td} whitespace-nowrap px-2`}><When iso={r.createdAt} date /></td>}
                   {visible('project') && <td className={`${td} whitespace-nowrap px-2`}>{r.clientName}</td>}
                   {visible('reporter') && <td className={`${td} whitespace-nowrap px-2 text-muted`}>{r.reporterName}</td>}

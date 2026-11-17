@@ -64,7 +64,7 @@ export function ClientHome() {
   const drawerEntry = all.find((e) => e.item?.id === openItem)
 
   const tile = (id: Show, label: string, n: number, hint: string) => (
-    <StatTile attention={id === 'waiting'} label={label} hint={hint} value={<span aria-label={loaded ? `${n}` : 'loading'}>{loaded ? n : '–'}</span>} active={show === id} onClick={() => set({ show: show === id ? 'all' : id })} />
+    <StatTile attention={id === 'waiting'} label={label} hint={hint} value={loaded ? n : '–'} active={show === id} onClick={() => set({ show: show === id ? 'all' : id })} />
   )
 
   return (
