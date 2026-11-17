@@ -924,6 +924,20 @@ app.post('/api/admin/clients', async (c) => {
   return c.json({ client: { id, name, users: [] } }, 201)
 })
 
+// Rename a project. Its name is read from here everywhere else, so reports, the roadmap, emails and clients' own
+// screens all show the new name straight away. Two projects cannot share a name: they could not be told apart.
+app.patch('/api/admin/clients/:id', async (c) => {
+  requireAdmin(c)
+  const client = await one<{ id: string; name: string }>('SELECT id, name FROM clients WHERE id = $1', c.req.param('id'))
+  if (!client) throw new HttpError(404, 'Project not found')
+  const name = text((await json(c)).name, 'name', 100, true)
+  if (await one('SELECT 1 AS x FROM clients WHERE LOWER(name) = LOWER($1) AND id <> $2', name, client.id)) {
+    throw new HttpError(409, 'Another project already has that name.')
+  }
+  if (name !== client.name) await run('UPDATE clients SET name = $1 WHERE id = $2', name, client.id)
+  return c.json({ client: { id: client.id, name } })
+})
+
 app.post('/api/admin/clients/:id/users', async (c) => {
   requireAdmin(c)
   const client = await one<{ id: string; name: string }>('SELECT id, name FROM clients WHERE id = $1', c.req.param('id'))

@@ -47,6 +47,11 @@ export function AdminClients() {
     finally { setSending(false) }
   }
 
+  async function renameProject(project: ClientOrg, next: string): Promise<boolean> {
+    try { await api.patch(`/api/admin/clients/${project.id}`, { name: next }); await reload(); notify(`Renamed to ${next}.`); return true }
+    catch (err) { fail(err, 'Could not rename the project'); return false }
+  }
+
   async function rename(person: Person, next: string): Promise<boolean> {
     try { await api.patch(`/api/admin/users/${person.id}`, { name: next }); await reload(); notify('Name saved.'); return true }
     catch (err) { fail(err, 'Could not save the name'); return false }
@@ -87,7 +92,7 @@ export function AdminClients() {
 
   return (
     <div className="max-w-4xl">
-      <PageHeader title="Projects and people" subtitle="Give people a name, invite them, send the invitation again, or take their access away. Each person only sees the projects they belong to." />
+      <PageHeader title="Projects and people" subtitle="Rename a project or a person by clicking the name. Invite people, send an invitation again, or take their access away. Each person only sees the projects they belong to." />
 
       <form onSubmit={addProject} className="mb-6 flex flex-wrap items-end gap-2">
         <Field label="New project" className="min-w-[14rem] flex-1"><input required className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Project or client name" /></Field>
@@ -102,7 +107,11 @@ export function AdminClients() {
             <section key={p.id} aria-labelledby={`p-${p.id}`} className="rounded-card border border-line bg-surface p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 id={`p-${p.id}`} className="flex items-center gap-2 break-words font-semibold"><Building2 className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />{p.name}</h2>
+                  <h2 id={`p-${p.id}`} className="flex items-center gap-2 font-semibold">
+                    <Building2 className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+                    {/* Click the name to rename the project. */}
+                    <span className="min-w-0 flex-1"><EditableCell value={p.name} label={`name of project ${p.name}`} required onSave={(v) => renameProject(p, v)} className="font-semibold" /></span>
+                  </h2>
                   <p className="mt-1 text-sm text-muted">{p.reportCount ?? 0} reports · {p.openCount ?? 0} open · {p.itemCount ?? 0} roadmap cards · {p.users.length} {p.users.length === 1 ? 'person' : 'people'}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">

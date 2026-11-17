@@ -62,7 +62,9 @@ export function EditableCell({ value, label, onSave, multiline, placeholder = 'A
     value: draft,
     'aria-label': label,
     'aria-invalid': failed || undefined,
-    disabled: pending,
+    // readOnly, not disabled: a disabled box drops keyboard focus, so Escape and Retry would stop working after a failed save.
+    readOnly: pending,
+    'aria-busy': pending || undefined,
     onChange: (e: React.ChangeEvent<HTMLInputElement & HTMLTextAreaElement>) => setDraft(e.target.value),
     className: 'input !min-h-9 w-full',
   }

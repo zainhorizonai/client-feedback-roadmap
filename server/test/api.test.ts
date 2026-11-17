@@ -1298,3 +1298,76 @@ describe('managing people and projects as an admin', () => {
     assert.ok((await people(yank)).some((u) => u.email === 'sam@both.com'))
   })
 })
+
+describe('renaming a project', () => {
+  const admin = new Client()
+  const jane = new Client()
+  let id = ''
+  let other = ''
+
+  before(async () => {
+    await run('DELETE FROM rate_hits')
+    await admin.signIn('admin@test.com')
+    id = (await admin.json('POST', '/api/admin/clients', { name: 'Old Name Co' })).data.client.id
+    other = (await admin.json('POST', '/api/admin/clients', { name: 'Neighbour Co' })).data.client.id
+    await admin.json('POST', `/api/admin/clients/${id}/users`, { email: 'rn@oldname.com', name: 'Rena' })
+    await jane.signIn('rn@oldname.com')
+  })
+
+  it('renames it, and the new name shows everywhere without anyone doing anything', async () => {
+    const rep = (await jane.json('POST', '/api/reports', { title: 'Named report', clientId: id, withVideo: false })).data.report
+    const feat = (await jane.json('POST', '/api/reports', { title: 'Named idea', kind: 'Feature request', clientId: id, withVideo: false })).data.report
+    const r = await admin.json('PATCH', `/api/admin/clients/${id}`, { name: '  New Name Co  ' })
+    assert.equal(r.status, 200)
+    assert.equal(r.data.client.name, 'New Name Co', 'trimmed')
+    assert.equal(((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === id)!.name, 'New Name Co')
+    assert.equal(((await admin.json('GET', '/api/reports')).data.reports as Json[]).find((x) => x.id === rep.id)!.clientName, 'New Name Co', 'on reports')
+    const item = ((await admin.json('GET', '/api/roadmap')).data.items as Json[]).find((i) => (i.reports as Json[]).some((x) => x.id === feat.id))!
+    assert.equal(item.clientName, 'New Name Co', 'on the roadmap')
+    assert.deepEqual(((await jane.json('GET', '/api/me')).data.user.projects as Json[]).map((p) => p.name), ['New Name Co'], 'on the client\'s own account')
+  })
+
+  it('uses the new name in later emails', async () => {
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    const mails: Json[] = []
+    config.emailProvider = 'smtp'; config.smtpUser = 'sender@gmail.com'
+    setMailTransportForTests({ sendMail: async (m) => { mails.push(m); return {} } })
+    try {
+      await jane.json('POST', '/api/reports', { title: 'After the rename', clientId: id, withVideo: false })
+      assert.ok(mails.some((m) => /New report from New Name Co/.test(m.subject)), 'the admin email names the new project')
+    } finally {
+      setMailTransportForTests(null); config.emailProvider = 'console'; config.smtpUser = ''
+    }
+  })
+
+  it('the delete confirmation now needs the new name', async () => {
+    const tmp = (await admin.json('POST', '/api/admin/clients', { name: 'Before Delete' })).data.client.id
+    await admin.json('PATCH', `/api/admin/clients/${tmp}`, { name: 'After Rename' })
+    assert.equal((await admin.json('POST', `/api/admin/clients/${tmp}/delete`, { confirm: 'Before Delete' })).status, 400, 'the old name no longer works')
+    assert.equal((await admin.json('POST', `/api/admin/clients/${tmp}/delete`, { confirm: 'After Rename' })).status, 200)
+  })
+
+  it('does not allow a blank name, a very long one, or another project\'s name', async () => {
+    assert.equal((await admin.json('PATCH', `/api/admin/clients/${id}`, { name: '   ' })).status, 400)
+    assert.equal((await admin.json('PATCH', `/api/admin/clients/${id}`, {})).status, 400)
+    assert.equal((await admin.json('PATCH', `/api/admin/clients/${id}`, { name: 'x'.repeat(101) })).status, 400)
+    const clash = await admin.json('PATCH', `/api/admin/clients/${id}`, { name: 'neighbour co' })
+    assert.equal(clash.status, 409, 'case does not make it a different name')
+    assert.equal(clash.data.error, 'Another project already has that name.')
+    assert.equal(((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === id)!.name, 'New Name Co', 'unchanged after a refused rename')
+  })
+
+  it('lets a project keep its own name, or change only its capitals', async () => {
+    assert.equal((await admin.json('PATCH', `/api/admin/clients/${id}`, { name: 'New Name Co' })).status, 200)
+    assert.equal((await admin.json('PATCH', `/api/admin/clients/${id}`, { name: 'NEW NAME CO' })).status, 200)
+    assert.equal(((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === id)!.name, 'NEW NAME CO')
+  })
+
+  it('is for admins only, and for projects that exist', async () => {
+    assert.equal((await jane.json('PATCH', `/api/admin/clients/${id}`, { name: 'Mine now' })).status, 403)
+    assert.equal((await new Client().json('PATCH', `/api/admin/clients/${id}`, { name: 'Mine now' })).status, 401)
+    assert.equal((await admin.json('PATCH', '/api/admin/clients/nope', { name: 'X' })).status, 404)
+    assert.equal(other.length > 0, true)
+  })
+})

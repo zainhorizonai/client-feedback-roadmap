@@ -62,7 +62,7 @@ These were asked for directly, so they replace the spec's version:
   offered Screen and Camera and told why. If the microphone or camera is blocked the person is told, and upload is always
   available.
 
-- **Admin people and project management.** Per person: rename, resend the invitation (or send a reset link once they have
+- **Admin people and project management.** Projects can be renamed in place (names must be unique, and the new name shows everywhere at once, including on clients' screens when they return to the tab). Per person: rename, resend the invitation (or send a reset link once they have
   accepted), remove from a project. Removal is soft, so reports keep their author's name, and the person can be invited
   again later with a fresh password. A project can be deleted after typing its name; that removes its reports, history,
   roadmap and stored videos. The project selector is a multi-select with chips, shared by the Inbox, Tracker and Roadmap.

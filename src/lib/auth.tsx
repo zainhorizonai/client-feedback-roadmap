@@ -37,6 +37,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
+  // Coming back to the tab refreshes who you are and which projects you are in. A renamed project shows its new
+  // name, and someone whose access was removed is signed out, without anyone having to reload.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return
+      api.get<{ user: User | null }>('/api/me')
+        .then((r) => setUser((prev) => (JSON.stringify(prev) === JSON.stringify(r.user) ? prev : r.user)))
+        .catch(() => { /* offline: keep what we have */ })
+    }
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    return () => { document.removeEventListener('visibilitychange', refresh); window.removeEventListener('focus', refresh) }
+  }, [])
+
   const signIn = useCallback(async (email: string, password: string) => {
     setUser((await api.post<{ user: User }>('/api/auth/login', { email, password })).user)
   }, [])
