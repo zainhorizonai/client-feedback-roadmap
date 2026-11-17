@@ -18,7 +18,7 @@ export function ReportModal({ report, onClose }: { report: Report; onClose: () =
       size="xl"
       title={report.title}
       onClose={onClose}
-      eyebrow={<><Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>{report.clientName}</span><span aria-hidden="true">·</span><span>{report.reporterName}</span><span aria-hidden="true">·</span><Mono>{fmtDateTime(report.createdAt)}</Mono></>}
+      eyebrow={<><Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>{report.clientName}</span><span className="hidden sm:contents"><span aria-hidden="true">·</span><span>{report.reporterName}</span><span aria-hidden="true">·</span><Mono>{fmtDateTime(report.createdAt)}</Mono></span></>}
     >
       <ReportBody report={report} />
     </Modal>

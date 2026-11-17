@@ -42,6 +42,8 @@ body {
 /* One focus treatment everywhere, with a variant for dark surfaces. */
 :focus-visible { outline: 2px solid var(--seam-focus); outline-offset: 2px; }
 .on-dark :focus-visible { outline-color: var(--seam-focus-on-dark); }
+/* A dialog is focused by code when it opens so keyboards start inside it. That is not a control, so no ring. */
+[role="dialog"]:focus-visible { outline: none; }
 
 h1 { font: var(--seam-type-page-mobile); }
 h2 { font: var(--seam-type-section); }

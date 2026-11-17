@@ -195,10 +195,10 @@ export function ReportDetail({ id, onClose }: { id: string; onClose: () => void 
       size="xl"
       title={report.title}
       onClose={onClose}
-      eyebrow={<><Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>Submitted <Mono>{fmtDateTime(report.createdAt)}</Mono></span></>}
-      actions={!editing ? <Button variant="secondary" onClick={startEdit}><Pencil className="h-4 w-4" aria-hidden="true" />Edit details</Button> : undefined}
+      eyebrow={<><Mono>{report.id}</Mono><span className="hidden sm:contents"><span aria-hidden="true">·</span><span>Submitted <Mono>{fmtDateTime(report.createdAt)}</Mono></span></span></>}
+      actions={!editing ? <Button variant="secondary" onClick={startEdit} className="max-sm:!px-0 max-sm:w-11"><Pencil className="h-4 w-4" aria-hidden="true" /><span className="max-sm:sr-only">Edit details</span></Button> : undefined}
     >
-      <ModalSplit main={main} side={side} />
+      <ModalSplit main={main} side={side} sideFirstOnPhone />
     </Modal>
   )
 }

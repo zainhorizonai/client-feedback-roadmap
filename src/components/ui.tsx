@@ -161,8 +161,9 @@ export function VideoEvidence({ src, title = 'Video', summary }: { src?: string 
       {src ? (
         <video ref={video} key={src} src={src} controls preload="metadata" playsInline aria-label={title} className="aspect-video w-full rounded-card bg-forest" />
       ) : (
-        <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-card bg-forest text-cream/80">
-          <VideoOff className="h-7 w-7" aria-hidden="true" />
+        // No video: a slim note, not a big empty player, so the useful content stays near the top.
+        <div className="flex items-center gap-2 rounded-control border border-line bg-canvas px-3 py-2.5 text-muted">
+          <VideoOff className="h-4 w-4 shrink-0" aria-hidden="true" />
           <p>No video was added.</p>
         </div>
       )}
@@ -257,11 +258,13 @@ export function Modal({ title, onClose, children, eyebrow, actions, size = 'md' 
 }
 
 /** The task-view layout: the conversation and evidence on the left, the facts and controls on the right. */
-export function ModalSplit({ main, side }: { main: ReactNode; side: ReactNode }) {
+export function ModalSplit({ main, side, sideFirstOnPhone = false }: { main: ReactNode; side: ReactNode; sideFirstOnPhone?: boolean }) {
+  // On a phone the columns stack. When the side holds the thing a person must act on (their status, a question
+  // for them), it goes first so it is the first thing they see.
   return (
-    <div className="lg:grid lg:h-full lg:grid-cols-[minmax(0,1fr)_21rem]">
-      <div className="px-4 py-5 md:px-8 lg:overflow-y-auto">{main}</div>
-      <aside aria-label="Details" className="border-t border-line bg-canvas/60 px-4 py-5 md:px-6 lg:overflow-y-auto lg:border-l lg:border-t-0">{side}</aside>
+    <div className="flex flex-col lg:grid lg:h-full lg:grid-cols-[minmax(0,1fr)_21rem]">
+      <div className={`px-4 py-5 md:px-8 lg:order-none lg:overflow-y-auto ${sideFirstOnPhone ? 'order-2' : ''}`}>{main}</div>
+      <aside aria-label="Details" className={`bg-canvas/60 px-4 py-5 md:px-6 lg:order-none lg:overflow-y-auto lg:border-l lg:border-t-0 ${sideFirstOnPhone ? 'order-1 border-b border-line lg:border-b-0' : 'border-t border-line'}`}>{side}</aside>
     </div>
   )
 }
