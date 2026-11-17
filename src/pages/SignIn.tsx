@@ -18,6 +18,8 @@ export function SignIn() {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (busy) return
+    // The button is always ready. Missing details get a plain message, not a dead button.
+    if (!email.trim() || !password) { setError(!email.trim() ? 'Enter your email address.' : 'Enter your password.'); return }
     setBusy(true)
     setError('')
     try {
@@ -41,7 +43,7 @@ export function SignIn() {
           <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" required />
         </div>
         {error && <p role="alert" className="mt-3 rounded-control bg-[var(--seam-error-bg)] px-3 py-2 font-medium text-[var(--seam-error-fg)]">{error}</p>}
-        <Button type="submit" pending={busy} disabled={!email.trim() || !password} className="mt-4 w-full">Sign in</Button>
+        <Button type="submit" pending={busy} className="mt-4 w-full">Sign in</Button>
         <p className="mt-4 text-center"><Link to="/forgot" className="font-semibold">Forgot your password?</Link></p>
       </form>
       <p className="mt-5 border-t border-line pt-4 text-center text-sm text-muted">First time here? Your invitation email has a link to set your password.</p>

@@ -7,9 +7,9 @@ import { addReply, assign, setStatus, updateFields, useReports } from '../lib/st
 import { useTeam } from '../lib/team'
 import { similarTo } from '../lib/similar'
 import { updateItem, useRoadmap } from '../lib/roadmap'
-import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Kind, type Report, type Severity, type Status } from '../lib/types'
+import { hasSeverity, KINDS, STATUSES, type Kind, type Report, type Status } from '../lib/types'
 import { Conversation, History } from './Activity'
-import { Block, Button, Field, fmtDateTime, KindTag, Modal, ModalSplit, Mono, SeverityBadge, StatusBadge, VideoEvidence } from './ui'
+import { Block, Button, Field, fmtDateTime, Modal, ModalSplit, Mono, Prop, SeveritySelect, StatusSelect, VideoEvidence } from './ui'
 
 /** The one report view used from the Inbox, the Tracker and the Roadmap: a large dialog, like a task view. */
 export function ReportModal({ report, onClose }: { report: Report; onClose: () => void }) {
@@ -138,33 +138,24 @@ function ReportBody({ report }: { report: Report }) {
 
   const side = (
     <>
-      <div className="space-y-3">
-        <Field label="Status">
-          <select className="input" value={report.status} onChange={(e) => setStatus(report.id, e.target.value as Status)}>
-            {STATUSES.map((s) => <option key={s}>{s}</option>)}
-          </select>
-        </Field>
-        <Field label="Assigned to">
-          <select className="input" value={report.assignee?.id ?? ''} onChange={(e) => assign(report.id, e.target.value, team.find((t) => t.id === e.target.value)?.name ?? '')}>
+      <div className="divide-y divide-line/70">
+        <Prop label="Status"><StatusSelect size="md" label="Status" value={report.status} onChange={(v) => setStatus(report.id, v)} /></Prop>
+        <Prop label="Severity">
+          {hasSeverity(report.kind) ? <SeveritySelect label="Severity" value={report.severity} onChange={(v) => updateFields(report.id, { severity: v })} /> : <span className="text-muted">Not used for this type</span>}
+        </Prop>
+        <Prop label="Owner">
+          <select className="input-ghost" aria-label="Assigned to" value={report.assignee?.id ?? ''} onChange={(e) => assign(report.id, e.target.value, team.find((t) => t.id === e.target.value)?.name ?? '')}>
             <option value="">Unassigned</option>
             {team.map((t) => <option key={t.id} value={t.id}>{t.name}{t.id === user?.id ? ' (you)' : ''}</option>)}
           </select>
-        </Field>
-        {user && report.assignee?.id !== user.id && <Button variant="secondary" className="!min-h-9" onClick={() => assign(report.id, user.id, user.name)}>Assign to me</Button>}
-        <Field label="Type">
-          <select className="input" value={report.kind} onChange={(e) => updateFields(report.id, { kind: e.target.value as Kind })}>
+          {user && report.assignee?.id !== user.id && <button type="button" onClick={() => assign(report.id, user.id, user.name)} className="mt-0.5 text-sm font-semibold underline underline-offset-2">Assign to me</button>}
+        </Prop>
+        <Prop label="Type">
+          <select className="input-ghost" aria-label="Type" value={report.kind} onChange={(e) => updateFields(report.id, { kind: e.target.value as Kind })}>
             {KINDS.map((k) => <option key={k}>{k}</option>)}
           </select>
-        </Field>
-        {hasSeverity(report.kind) && (
-          <Field label="Severity">
-            <select className="input" value={report.severity} onChange={(e) => updateFields(report.id, { severity: e.target.value as Severity })}>
-              {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </Field>
-        )}
+        </Prop>
       </div>
-      <p className="mt-3 flex flex-wrap items-center gap-2"><StatusBadge status={report.status} />{hasSeverity(report.kind) && <SeverityBadge severity={report.severity} />}<KindTag kind={report.kind} /></p>
 
       {duplicates.length > 0 && (
         <Block title="Possible duplicates" hint="Open items in this project with a similar title.">

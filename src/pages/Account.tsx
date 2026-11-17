@@ -54,7 +54,7 @@ export function Account() {
         <fieldset disabled={savingNotify} className="space-y-2">
           <legend className="sr-only">How often should we email you about updates?</legend>
           {([['instant', 'As they happen', 'One email for each update.'], ['digest', 'One summary a day', 'Everything from the day in a single email.']] as const).map(([m, label, hint]) => (
-            <label key={m} className={`flex cursor-pointer items-start gap-3 rounded-control border p-3 ${(mode ?? user.notify) === m ? 'border-action ring-1 ring-action' : 'border-line'}`}>
+            <label key={m} className={`flex cursor-pointer items-start gap-3 rounded-control border p-3 ${(mode ?? user.notify) === m ? 'border-forest ring-1 ring-forest' : 'border-line'}`}>
               <input type="radio" name="notify" className="mt-1 h-4 w-4 accent-[var(--seam-terracotta)]" checked={(mode ?? user.notify) === m}
                 onChange={async () => { setMode(m); setSavingNotify(true); try { await setNotify(m); notify(m === 'digest' ? 'You will get one summary a day.' : 'You will get updates as they happen.') } catch { notify('We could not save that. Try again.', 'error') } setMode(null); setSavingNotify(false) }} />
               <span><span className="font-semibold">{label}</span><span className="block text-sm text-muted">{hint}</span></span>

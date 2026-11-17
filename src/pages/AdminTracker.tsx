@@ -10,7 +10,7 @@ import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Report, type Severity, t
 import { EditableCell } from '../components/EditableCell'
 import { ReportModal } from '../components/ReportModal'
 import { ProjectChips } from '../components/ProjectFilter'
-import { Button, EmptyState, fmtDate, Mono, PageHeader, Skeleton, StatTile, StatusBadge } from '../components/ui'
+import { Button, EmptyState, fmtDate, Mono, PageHeader, SeveritySelect, Skeleton, StatTile, StatusSelect } from '../components/ui'
 import { notify } from '../lib/toast'
 
 type SortKey = 'id' | 'createdAt' | 'title' | 'severity' | 'status'
@@ -284,19 +284,12 @@ export function AdminTracker() {
                   )}
                   {visible('pageUrl') && <td className={`${td} min-w-[12rem] max-w-xs`}><EditableCell value={r.pageUrl} label={`page of ${r.id}`} onSave={(v) => updateFields(r.id, { pageUrl: v })} /></td>}
                   {visible('severity') && (
-                    <td className={`${td} px-1`}>
-                      {hasSeverity(r.kind) ? (
-                        <select className="input !min-h-9 !w-28" aria-label={`Severity of ${r.id}`} value={r.severity} onChange={(e) => updateFields(r.id, { severity: e.target.value as Severity })}>{SEVERITIES.map((s) => <option key={s}>{s}</option>)}</select>
-                      ) : <span className="px-2 text-muted" aria-label="No severity">—</span>}
+                    <td className={`${td} px-2`}>
+                      {hasSeverity(r.kind) ? <SeveritySelect label={`Severity of ${r.id}`} value={r.severity} onChange={(v) => updateFields(r.id, { severity: v })} /> : <span className="px-2 text-muted" aria-label="No severity">—</span>}
                     </td>
                   )}
                   {visible('status') && (
-                    <td className={`${td} px-1`}>
-                      <div className="flex items-center gap-2">
-                        <select className="input !min-h-9 !w-40" aria-label={`Status of ${r.id}`} value={r.status} onChange={(e) => setStatus(r.id, e.target.value as Status)}>{STATUSES.map((s) => <option key={s}>{s}</option>)}</select>
-                        <span className="hidden 2xl:inline"><StatusBadge status={r.status} /></span>
-                      </div>
-                    </td>
+                    <td className={`${td} px-2`}><StatusSelect label={`Status of ${r.id}`} value={r.status} onChange={(v) => setStatus(r.id, v)} /></td>
                   )}
                   {visible('assignee') && <td className={`${td} whitespace-nowrap px-2`}>{r.assignee ? (r.assignee.id === user?.id ? 'You' : r.assignee.name) : <span className="text-muted">Unassigned</span>}</td>}
                   {visible('age') && <td className={`${td} whitespace-nowrap px-2 text-muted`}>{waitingText(r).replace('Waiting ', '') || '—'}</td>}

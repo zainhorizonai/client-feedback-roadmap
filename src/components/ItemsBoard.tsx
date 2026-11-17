@@ -36,7 +36,7 @@ export function ItemsBoard({ entries, onMove, onOpenItem }: Props) {
               setOver(null); setDragging(null)
               if (entry?.item && entry.stage !== stage) onMove(entry, stage)
             }}
-            className={`rounded-card p-3 ${over === stage ? 'bg-subtle ring-2 ring-action' : 'bg-subtle/50'}`}
+            className={`rounded-card p-3 ${over === stage ? 'bg-subtle ring-2 ring-forest' : 'bg-subtle/50'}`}
           >
             <h2 id={`stage-${stage}`} className="mb-3 flex items-center justify-between px-1 font-semibold">
               {stage}

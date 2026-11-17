@@ -1,7 +1,8 @@
-import { cloneElement, forwardRef, useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from 'react'
+import { cloneElement, forwardRef, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, type LinkProps } from 'react-router-dom'
-import { Loader2, VideoOff, X } from 'lucide-react'
-import { CLIENT_STATUS, type Kind, type RoadmapState, type Severity, type Status } from '../lib/types'
+import { Check, ChevronDown, Loader2, VideoOff, X } from 'lucide-react'
+import { CLIENT_STATUS, SEVERITIES, STATUSES, type Kind, type RoadmapState, type Severity, type Status } from '../lib/types'
 
 // ---------- Button ----------
 
@@ -56,6 +57,117 @@ export const StageBadge = ({ stage }: { stage: RoadmapState }) => <span classNam
 export const KindTag = ({ kind }: { kind: Kind }) => (
   <span className="inline-block rounded-control border border-line bg-surface px-2 py-0.5 text-[.8125rem] leading-5 text-muted">{kind}</span>
 )
+
+// ---------- Pill select: a coloured label you click to change, instead of a form dropdown ----------
+
+interface PillSelectProps<T extends string> {
+  value: T
+  options: readonly T[]
+  onChange: (v: T) => void
+  /** Spoken name, for example "Status of ACME-4". */
+  label: string
+  /** The badge colour class for a value. */
+  tone: (v: T) => string
+  size?: 'sm' | 'md'
+}
+
+export function PillSelect<T extends string>({ value, options, onChange, label, tone, size = 'sm' }: PillSelectProps<T>) {
+  const [open, setOpen] = useState(false)
+  const [at, setAt] = useState<{ x: number; y: number; up: boolean } | null>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  const id = useId()
+
+  function toggle() {
+    if (open) { setOpen(false); return }
+    const r = button.current!.getBoundingClientRect()
+    // Open upward near the bottom of the window. Placed from the window, so a scrolling table never clips it.
+    const up = window.innerHeight - r.bottom < options.length * 40 + 24
+    setAt({ x: r.left, y: up ? r.top - 6 : r.bottom + 6, up })
+    setOpen(true)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const items = () => [...(list.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])]
+    ;(items().find((x) => x.getAttribute('aria-selected') === 'true') ?? items()[0])?.focus()
+    const close = (focusButton: boolean) => { setOpen(false); if (focusButton) button.current?.focus() }
+    // Capture phase, and stopped there, so Escape closes only this menu and not the dialog behind it.
+    const onKey = (e: KeyboardEvent) => {
+      if (!list.current?.contains(document.activeElement) && document.activeElement !== button.current) return
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true) }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation()
+        const list_ = items(); const i = list_.indexOf(document.activeElement as HTMLElement)
+        list_[(i + (e.key === 'ArrowDown' ? 1 : -1) + list_.length) % list_.length]?.focus()
+      } else if (e.key === 'Tab') close(false)
+    }
+    const onDown = (e: MouseEvent) => { if (!list.current?.contains(e.target as Node) && !button.current?.contains(e.target as Node)) close(false) }
+    const onMove = () => close(false)
+    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('mousedown', onDown)
+    window.addEventListener('resize', onMove)
+    window.addEventListener('scroll', onMove, true)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('scroll', onMove, true)
+    }
+  }, [open])
+
+  const pick = (v: T) => { setOpen(false); button.current?.focus(); if (v !== value) onChange(v) }
+
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        onClick={toggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        aria-label={`${label}: ${value}. Change`}
+        className={`badge ${tone(value)} cursor-pointer gap-1.5 transition-shadow hover:shadow-[0_0_0_2px_var(--seam-border-control)] ${size === 'md' ? '!px-3 !py-1.5 !text-base' : 'min-h-8 !px-2.5'}`}
+      >
+        {value}<ChevronDown className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
+      </button>
+      {open && at && createPortal(
+        <ul
+          ref={list} id={id} role="listbox" aria-label={label}
+          // The menu is drawn outside the table, but React still passes clicks up to the row. Stop it, or choosing a
+          // status would also open the ticket.
+          onClick={(e) => e.stopPropagation()}
+          style={{ position: 'fixed', left: Math.min(at.x, window.innerWidth - 232), top: at.up ? undefined : at.y, bottom: at.up ? window.innerHeight - at.y : undefined }}
+          className="z-50 w-56 rounded-card border border-line bg-surface p-1.5 shadow-xl"
+        >
+          {options.map((o) => (
+            <li key={o} role="option" aria-selected={o === value} tabIndex={-1} onClick={() => pick(o)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(o) } }}
+              className="flex min-h-9 cursor-pointer items-center justify-between gap-2 rounded-control px-2 hover:bg-canvas focus:bg-canvas">
+              <span className={`badge ${tone(o)}`}>{o}</span>{o === value && <Check className="h-4 w-4 text-muted" aria-label="Selected" />}
+            </li>
+          ))}
+        </ul>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+export const StatusSelect = ({ value, onChange, label, size }: { value: Status; onChange: (v: Status) => void; label: string; size?: 'sm' | 'md' }) =>
+  <PillSelect value={value} options={STATUSES} onChange={onChange} label={label} size={size} tone={(v) => STATUS_TONE[v]} />
+export const SeveritySelect = ({ value, onChange, label, size }: { value: Severity; onChange: (v: Severity) => void; label: string; size?: 'sm' | 'md' }) =>
+  <PillSelect value={value} options={SEVERITIES} onChange={onChange} label={label} size={size} tone={(v) => SEVERITY_TONE[v]} />
+
+/** One property in a ticket's side panel: a quiet label, and a value that looks like text until you point at it. */
+export function Prop({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid min-h-11 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+      <span className="text-sm text-muted">{label}</span>
+      <div className="min-w-0">{children}</div>
+    </div>
+  )
+}
 
 // ---------- Formatting ----------
 
@@ -282,7 +394,7 @@ export function Block({ title, children, tone = 'plain', hint }: { title: string
 
 /** Big number tiles used at the top of both the client and admin pages. */
 export function StatTile({ label, hint, value, active, onClick }: { label: string; hint?: string; value: ReactNode; active?: boolean; onClick?: () => void }) {
-  const cls = `rounded-card border p-4 text-left ${active ? 'border-action bg-surface ring-2 ring-action' : 'border-line bg-surface'} ${onClick ? 'hover:border-control' : ''}`
+  const cls = `rounded-card border p-4 text-left ${active ? 'border-forest bg-surface ring-2 ring-forest' : 'border-line bg-surface'} ${onClick ? 'hover:border-control' : ''}`
   const inner = (<><span className="block text-3xl font-semibold tabular-nums">{value}</span><span className="block font-semibold">{label}</span>{hint && <span className="block text-sm text-muted">{hint}</span>}</>)
   return onClick ? <button type="button" onClick={onClick} aria-pressed={!!active} className={cls}>{inner}</button> : <div className={cls}>{inner}</div>
 }

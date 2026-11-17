@@ -5,9 +5,9 @@ import { useProject } from '../lib/project'
 import { startTriage, updateFields, useReports, useReportsLoaded } from '../lib/store'
 import { useAuth } from '../lib/auth'
 import { waitingText } from '../lib/waiting'
-import { hasSeverity, SEVERITIES, type Report, type Severity } from '../lib/types'
+import { hasSeverity, type Report, type Severity } from '../lib/types'
 import { ReportModal } from '../components/ReportModal'
-import { Button, EmptyState, fmtDateTime, KindTag, Mono, PageHeader, SeverityBadge, Skeleton } from '../components/ui'
+import { Button, EmptyState, fmtDateTime, KindTag, Mono, PageHeader, SeveritySelect, Skeleton } from '../components/ui'
 
 type Sort = 'newest' | 'oldest' | 'severity'
 const RANK: Record<Severity, number> = { Blocker: 0, High: 1, Medium: 2, Low: 3 }
@@ -76,17 +76,10 @@ export function AdminInbox() {
                   </p>
                   <button type="button" onClick={() => setParams({ report: r.id }, { replace: true })} className="mt-1 text-left font-semibold hover:underline">{r.title}</button>
                   {r.description && <p className="mt-1 line-clamp-2 break-words text-muted">{r.description}</p>}
-                  <p className="mt-2 flex flex-wrap items-center gap-2"><KindTag kind={r.kind} />{hasSeverity(r.kind) && <SeverityBadge severity={r.severity} />}{r.hasVideo && <span className="text-sm text-muted">Has video</span>}{r.assignee && <span className="text-sm text-muted">Assigned to {r.assignee.id === user?.id ? 'you' : r.assignee.name}</span>}</p>
+                  <p className="mt-2 flex flex-wrap items-center gap-2"><KindTag kind={r.kind} />{r.hasVideo && <span className="text-sm text-muted">Has video</span>}{r.assignee && <span className="text-sm text-muted">Assigned to {r.assignee.id === user?.id ? 'you' : r.assignee.name}</span>}</p>
                 </div>
                 <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
-                  {hasSeverity(r.kind) && (
-                    <label className="text-sm">
-                      <span className="sr-only">Severity for {r.id}</span>
-                      <select className="input !w-auto" value={r.severity} onChange={(e) => updateFields(r.id, { severity: e.target.value as Severity })}>
-                        {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
-                      </select>
-                    </label>
-                  )}
+                  {hasSeverity(r.kind) && <SeveritySelect label={`Severity of ${r.id}`} value={r.severity} onChange={(v) => updateFields(r.id, { severity: v })} />}
                   <Button onClick={() => triage(r, 'Triaging')} pending={busy === r.id + 'Triaging'}><SearchIcon className="h-4 w-4" aria-hidden="true" />Start triage</Button>
                   <Button variant="secondary" onClick={() => triage(r, 'Needs client input')} pending={busy === r.id + 'Needs client input'}><MessageCircleQuestion className="h-4 w-4" aria-hidden="true" />Ask for input</Button>
                 </div>

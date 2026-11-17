@@ -68,6 +68,9 @@ h2 { font: var(--seam-type-section); }
   .input::placeholder { color: #6f7a6d; }
   .input[aria-invalid="true"] { border-color: var(--seam-error-fg); }
   textarea.input { min-height: 5rem; }
+  /* A value that reads as plain text until you point at it or focus it: used for ticket properties. */
+  .input-ghost { width: 100%; min-height: 2.25rem; background: transparent; color: var(--seam-text); border: 1px solid transparent; border-radius: var(--seam-radius-control); padding: .25rem .5rem; margin-left: -.5rem; font: inherit; font-weight: 600; cursor: pointer; }
+  .input-ghost:hover, .input-ghost:focus-visible { border-color: var(--seam-border-control); background: var(--seam-surface); }
 }
 
 @media (prefers-reduced-motion: reduce) {

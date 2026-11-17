@@ -148,9 +148,9 @@ export function NewReport() {
           <legend className="mb-2 font-semibold">What are you sending us?</legend>
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
             {OPTIONS.map((o) => (
-              <label key={o.kind} className={`relative flex cursor-pointer flex-col rounded-card border p-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${kind === o.kind ? 'border-action bg-surface ring-2 ring-action' : 'border-line bg-surface hover:border-control'}`}>
+              <label key={o.kind} className={`relative flex cursor-pointer flex-col rounded-card border p-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus ${kind === o.kind ? 'border-forest bg-surface ring-2 ring-forest' : 'border-line bg-surface hover:border-control'}`}>
                 <input type="radio" name="kind" value={o.kind} checked={kind === o.kind} onChange={() => setKind(o.kind)} className="sr-only" />
-                <o.icon className={`h-5 w-5 ${kind === o.kind ? 'text-action' : 'text-muted'}`} aria-hidden="true" />
+                <o.icon className={`h-5 w-5 ${kind === o.kind ? 'text-forest' : 'text-muted'}`} aria-hidden="true" />
                 <span className="mt-2 font-semibold">{o.kind}</span>
                 <span className="text-sm text-muted">{o.hint}</span>
               </label>
