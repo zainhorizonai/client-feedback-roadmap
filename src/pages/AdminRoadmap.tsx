@@ -6,8 +6,8 @@ import { useReports } from '../lib/store'
 import { createItem, deleteItem, updateItem, useRoadmap, useRoadmapLoaded } from '../lib/roadmap'
 import { ROADMAP_STATES, type RoadmapItem, type RoadmapState } from '../lib/types'
 import { RoadmapBoard } from '../components/RoadmapBoard'
-import { ReportDrawer } from '../components/ReportDrawer'
-import { Button, Drawer, EmptyState, Field, Mono, PageHeader, Skeleton, StatusBadge } from '../components/ui'
+import { ReportModal } from '../components/ReportModal'
+import { Button, Modal, EmptyState, Field, Mono, PageHeader, Skeleton, StatusBadge } from '../components/ui'
 
 interface Draft { clientId: string; title: string; description: string; state: RoadmapState; targetWindow: string; clientUpdate: string; published: boolean; reportIds: string[] }
 const blank = (clientId: string): Draft => ({ clientId, title: '', description: '', state: 'Under review', targetWindow: '', clientUpdate: '', published: false, reportIds: [] })
@@ -68,7 +68,7 @@ export function AdminRoadmap() {
       )}
 
       {editing && <ItemEditor item={editing.item} defaultClientId={single?.id ?? projects.find((p) => matches(p.id))?.id ?? ''} onClose={() => setEditing(null)} onOpenReport={(id) => setParams({ report: id }, { replace: true })} />}
-      {openReport && <ReportDrawer report={openReport} onClose={() => setParams({}, { replace: true })} />}
+      {openReport && <ReportModal report={openReport} onClose={() => setParams({}, { replace: true })} />}
     </>
   )
 }
@@ -95,7 +95,7 @@ function ItemEditor({ item, defaultClientId, onClose, onOpenReport }: { item: Ro
   }
 
   return (
-    <Drawer title={item ? item.title : 'Add roadmap item'} onClose={onClose}>
+    <Modal title={item ? item.title : 'Add roadmap item'} onClose={onClose}>
       <div className="space-y-4">
         {!item && (
           <Field label="Project" required>
@@ -160,6 +160,6 @@ function ItemEditor({ item, defaultClientId, onClose, onOpenReport }: { item: Ro
           <span className="flex gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={save} pending={saving}>Save item</Button></span>
         </div>
       </div>
-    </Drawer>
+    </Modal>
   )
 }

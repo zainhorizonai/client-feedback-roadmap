@@ -4,23 +4,19 @@ import { addReply, setStatus, updateFields } from '../lib/store'
 import { updateItem, useRoadmap } from '../lib/roadmap'
 import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Kind, type Report, type Severity, type Status } from '../lib/types'
 import { Conversation, History } from './Activity'
-import { Button, Drawer, Field, fmtDateTime, KindTag, Mono, SeverityBadge, StatusBadge, VideoEvidence } from './ui'
+import { Block, Button, Field, fmtDateTime, KindTag, Modal, ModalSplit, Mono, SeverityBadge, StatusBadge, VideoEvidence } from './ui'
 
-/** The one report detail used from the Inbox, the Tracker and the Roadmap. */
-export function ReportDrawer({ report, onClose }: { report: Report; onClose: () => void }) {
+/** The one report view used from the Inbox, the Tracker and the Roadmap: a large dialog, like a task view. */
+export function ReportModal({ report, onClose }: { report: Report; onClose: () => void }) {
   return (
-    <Drawer title={report.title} onClose={onClose}>
+    <Modal
+      size="xl"
+      title={report.title}
+      onClose={onClose}
+      eyebrow={<><Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>{report.clientName}</span><span aria-hidden="true">·</span><span>{report.reporterName}</span><span aria-hidden="true">·</span><Mono>{fmtDateTime(report.createdAt)}</Mono></>}
+    >
       <ReportBody report={report} />
-    </Drawer>
-  )
-}
-
-function Section({ title, children, tone = 'plain' }: { title: string; children: React.ReactNode; tone?: 'plain' | 'private' }) {
-  return (
-    <section className={`mt-7 ${tone === 'private' ? 'rounded-card border border-dashed border-control bg-subtle/50 p-4' : ''}`}>
-      <h3 className="mb-2 flex items-center gap-2 font-semibold">{tone === 'private' && <Lock className="h-4 w-4" aria-hidden="true" />}{title}</h3>
-      {children}
-    </section>
+    </Modal>
   )
 }
 
@@ -55,16 +51,36 @@ function ReportBody({ report }: { report: Report }) {
     setLinking('')
   }
 
-  return (
-    <div className="-mt-1">
-      <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted">
-        <Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>{report.clientName}</span><span aria-hidden="true">·</span>
-        <span>{report.reporterName}</span><span aria-hidden="true">·</span><Mono>{fmtDateTime(report.createdAt)}</Mono>
-      </p>
-
+  const main = (
+    <>
       <VideoEvidence src={report.hasVideo ? `/api/reports/${report.id}/video` : null} title={`Video for ${report.title}`} />
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      {(report.description || report.pageUrl) && (
+        <Block title="What the client said">
+          {report.description && <p className="whitespace-pre-wrap break-words">{report.description}</p>}
+          {report.pageUrl && <p className="mt-2 break-all text-sm text-muted">{report.pageUrl}</p>}
+        </Block>
+      )}
+
+      <Block title="Shared replies" hint="The client sees these and is emailed.">
+        <Conversation history={report.history} viewer="admin" />
+        <div className="mt-3">
+          <Field label="Shared reply">
+            <textarea className="input" rows={3} value={reply} onChange={(e) => setReply(e.target.value)} />
+          </Field>
+          <div className="mt-2 flex justify-end">
+            <Button onClick={send} pending={sending} disabled={!reply.trim()}><Send className="h-4 w-4" aria-hidden="true" /> Send reply</Button>
+          </div>
+        </div>
+      </Block>
+
+      <Block title="History"><History history={report.history} /></Block>
+    </>
+  )
+
+  const side = (
+    <>
+      <div className="space-y-3">
         <Field label="Status">
           <select className="input" value={report.status} onChange={(e) => setStatus(report.id, e.target.value as Status)}>
             {STATUSES.map((s) => <option key={s}>{s}</option>)}
@@ -83,20 +99,13 @@ function ReportBody({ report }: { report: Report }) {
           </Field>
         )}
       </div>
-      <p className="mt-2 flex flex-wrap items-center gap-2"><StatusBadge status={report.status} />{hasSeverity(report.kind) && <SeverityBadge severity={report.severity} />}<KindTag kind={report.kind} /></p>
+      <p className="mt-3 flex flex-wrap items-center gap-2"><StatusBadge status={report.status} />{hasSeverity(report.kind) && <SeverityBadge severity={report.severity} />}<KindTag kind={report.kind} /></p>
 
-      {(report.description || report.pageUrl) && (
-        <Section title="What the client said">
-          {report.description && <p className="whitespace-pre-wrap break-words">{report.description}</p>}
-          {report.pageUrl && <p className="mt-2 break-all text-sm text-muted">{report.pageUrl}</p>}
-        </Section>
-      )}
-
-      <Section title="Related roadmap work">
+      <Block title="Related roadmap work">
         {linked.length === 0 ? <p className="text-muted">Not linked to any roadmap item.</p> : (
           <ul className="space-y-1.5">
             {linked.map((i) => (
-              <li key={i.id} className="flex items-center justify-between gap-2 rounded-control border border-line px-3 py-2">
+              <li key={i.id} className="flex items-center justify-between gap-2 rounded-control border border-line bg-surface px-3 py-2">
                 <span className="flex min-w-0 items-center gap-2"><Link2 className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" /><span className="truncate">{i.title}</span></span>
                 <span className="shrink-0 text-sm text-muted">{i.state}</span>
               </li>
@@ -113,22 +122,10 @@ function ReportBody({ report }: { report: Report }) {
             </Field>
           </div>
         )}
-      </Section>
+      </Block>
 
-      <Section title="Shared replies">
-        <p className="mb-3 text-sm text-muted">The client sees these and is emailed.</p>
-        <Conversation history={report.history} viewer="admin" />
-        <div className="mt-3">
-          <Field label="Shared reply">
-            <textarea className="input" rows={3} value={reply} onChange={(e) => setReply(e.target.value)} />
-          </Field>
-          <div className="mt-2 flex justify-end">
-            <Button onClick={send} pending={sending} disabled={!reply.trim()}><Send className="h-4 w-4" aria-hidden="true" /> Send reply</Button>
-          </div>
-        </div>
-      </Section>
-
-      <Section title="Internal note" tone="private">
+      <section className="mt-6 rounded-card border border-dashed border-control bg-subtle/50 p-4">
+        <h3 className="mb-1.5 flex items-center gap-2 font-semibold"><Lock className="h-4 w-4" aria-hidden="true" />Internal note</h3>
         <p className="mb-2 text-sm text-muted">Only your team can see this. It is never emailed or exported.</p>
         <Field label="Internal note">
           <textarea className="input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -137,9 +134,9 @@ function ReportBody({ report }: { report: Report }) {
           <Button variant="secondary" disabled={notes === (report.notes ?? '')} onClick={() => setNotes(report.notes ?? '')}>Cancel</Button>
           <Button onClick={saveNotes} pending={savingNotes} disabled={notes === (report.notes ?? '')}>Save note</Button>
         </div>
-      </Section>
+      </section>
 
-      <Section title="Resolution evidence">
+      <Block title="Resolution evidence">
         <Field label="Resolution video link" hint="Shown to the client. Paste a link to a short video of the fix.">
           <input className="input" inputMode="url" placeholder="https://…" value={resolution} onChange={(e) => setResolution(e.target.value)} />
         </Field>
@@ -147,9 +144,9 @@ function ReportBody({ report }: { report: Report }) {
           <Button variant="secondary" disabled={resolution === report.resolutionUrl} onClick={() => setResolution(report.resolutionUrl)}>Cancel</Button>
           <Button onClick={saveResolution} pending={savingRes} disabled={resolution === report.resolutionUrl}>Save link</Button>
         </div>
-      </Section>
-
-      <Section title="History"><History history={report.history} /></Section>
-    </div>
+      </Block>
+    </>
   )
+
+  return <ModalSplit main={main} side={side} />
 }

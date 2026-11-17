@@ -12,7 +12,6 @@ import { SetPassword } from './pages/SetPassword'
 import { Account } from './pages/Account'
 import { ClientHome } from './pages/ClientHome'
 import { NewReport } from './pages/NewReport'
-import { ReportDetail } from './pages/ReportDetail'
 import { AdminInbox } from './pages/AdminInbox'
 import { AdminTracker } from './pages/AdminTracker'
 import { AdminRoadmap } from './pages/AdminRoadmap'
@@ -69,9 +68,8 @@ function Routed() {
       <Route path="/auth/verify" element={<Navigate to="/reports" replace />} />
       <Route element={<ClientShell />}>
         <Route path="/account" element={<Account />} />
-        <Route path="/reports" element={<ClientHome />} />
+        <Route path="/reports/:id?" element={<ClientHome />} />
         <Route path="/reports/new" element={<NewReport />} />
-        <Route path="/reports/:id" element={<ReportDetail />} />
         <Route path="/roadmap" element={<Navigate to="/reports?view=board" replace />} />
         <Route path="*" element={<Navigate to="/reports" replace />} />
       </Route>

@@ -155,11 +155,23 @@ export function VideoEvidence({ src, title = 'Video', summary }: { src?: string 
   )
 }
 
-// ---------- Drawer: labelled dialog, traps focus, returns it on close ----------
+// ---------- Modal: a large centred dialog (like a task view). Labelled, traps focus, returns it on close ----------
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), video[controls], [tabindex]:not([tabindex="-1"])'
 
-export function Drawer({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+interface ModalProps {
+  title: string
+  onClose: () => void
+  children: ReactNode
+  /** Small line above the title, such as the ID and project. */
+  eyebrow?: ReactNode
+  /** Buttons or badges shown beside the close button. */
+  actions?: ReactNode
+  /** md for short forms; xl for a full task view that uses ModalSplit. */
+  size?: 'md' | 'xl'
+}
+
+export function Modal({ title, onClose, children, eyebrow, actions, size = 'md' }: ModalProps) {
   const panel = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const close = useRef(onClose)
@@ -172,7 +184,7 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
     panel.current?.focus()
 
     // Listen on the document, not the panel: when a focused button disables itself (for example while saving)
-    // the browser moves focus to the page body, and keys would otherwise stop reaching the drawer.
+    // the browser moves focus to the page body, and keys would otherwise stop reaching the dialog.
     function onKey(e: KeyboardEvent) {
       const el = panel.current
       if (!el) return
@@ -192,30 +204,77 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = previousOverflow
-      // Give focus back to the control that opened the drawer.
+      // Give focus back to the control that opened the dialog.
       if (opener && document.contains(opener)) opener.focus()
     }
   }, [])
 
+  const big = size === 'xl'
   return (
-    <div className="fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-forest/40" onClick={onClose} aria-hidden="true" />
+    <div className="fixed inset-0 z-40 flex items-stretch justify-center md:items-center md:p-6">
+      <div className="absolute inset-0 bg-forest/50" onClick={onClose} aria-hidden="true" />
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="absolute inset-y-0 right-0 flex w-full flex-col bg-surface shadow-2xl outline-none md:w-[min(100%,var(--seam-drawer-width))] md:border-l md:border-line"
+        className={`relative flex w-full flex-col overflow-hidden bg-surface shadow-2xl outline-none md:rounded-[1rem] ${big ? 'h-[100dvh] md:h-[min(90vh,60rem)] md:max-w-6xl' : 'h-[100dvh] md:h-auto md:max-h-[90vh] md:max-w-xl'}`}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-4 md:px-6">
-          <h2 id={titleId} className="min-w-0 break-words font-semibold">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink md:h-9 md:w-9">
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
+        <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3 md:px-6 md:py-4">
+          <div className="min-w-0">
+            {eyebrow && <div className="mb-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">{eyebrow}</div>}
+            <h2 id={titleId} className="min-w-0 break-words text-xl font-semibold leading-snug">{title}</h2>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {actions}
+            <button type="button" onClick={onClose} aria-label="Close" className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink md:h-9 md:w-9">
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-5 md:px-6">{children}</div>
+        {/* Short forms scroll as one. A full task view scrolls its two columns separately on wide screens. */}
+        <div className={`min-h-0 flex-1 overflow-y-auto ${big ? 'lg:overflow-hidden' : 'px-4 py-5 md:px-6'}`}>{children}</div>
       </div>
+    </div>
+  )
+}
+
+/** The task-view layout: the conversation and evidence on the left, the facts and controls on the right. */
+export function ModalSplit({ main, side }: { main: ReactNode; side: ReactNode }) {
+  return (
+    <div className="lg:grid lg:h-full lg:grid-cols-[minmax(0,1fr)_21rem]">
+      <div className="px-4 py-5 md:px-8 lg:overflow-y-auto">{main}</div>
+      <aside aria-label="Details" className="border-t border-line bg-canvas/60 px-4 py-5 md:px-6 lg:overflow-y-auto lg:border-l lg:border-t-0">{side}</aside>
+    </div>
+  )
+}
+
+/** A titled group inside a modal column. */
+export function Block({ title, children, tone = 'plain', hint }: { title: string; children: ReactNode; tone?: 'plain' | 'private'; hint?: ReactNode }) {
+  return (
+    <section className={`mt-6 first:mt-0 ${tone === 'private' ? 'rounded-card border border-dashed border-control bg-subtle/50 p-4' : ''}`}>
+      <h3 className="mb-1.5 font-semibold">{title}</h3>
+      {hint && <p className="mb-2 text-sm text-muted">{hint}</p>}
+      {children}
+    </section>
+  )
+}
+
+/** Big number tiles used at the top of both the client and admin pages. */
+export function StatTile({ label, hint, value, active, onClick }: { label: string; hint?: string; value: ReactNode; active?: boolean; onClick?: () => void }) {
+  const cls = `rounded-card border p-4 text-left ${active ? 'border-action bg-surface ring-2 ring-action' : 'border-line bg-surface'} ${onClick ? 'hover:border-control' : ''}`
+  const inner = (<><span className="block text-3xl font-semibold tabular-nums">{value}</span><span className="block font-semibold">{label}</span>{hint && <span className="block text-sm text-muted">{hint}</span>}</>)
+  return onClick ? <button type="button" onClick={onClick} aria-pressed={!!active} className={cls}>{inner}</button> : <div className={cls}>{inner}</div>
+}
+
+/** A small set of mutually exclusive buttons, used for view and type switches. */
+export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex rounded-control border border-control bg-surface p-0.5">
+      {options.map((o) => (
+        <button key={o.id} type="button" onClick={() => onChange(o.id)} aria-pressed={value === o.id} className={`min-h-10 rounded-[.25rem] px-3 font-semibold md:min-h-8 ${value === o.id ? 'bg-forest text-cream' : 'text-ink hover:bg-canvas'}`}>{o.label}</button>
+      ))}
     </div>
   )
 }

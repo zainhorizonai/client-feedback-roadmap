@@ -5,9 +5,9 @@ import { useProject } from '../lib/project'
 import { setStatus, updateFields, useReports, useReportsLoaded } from '../lib/store'
 import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Report, type Severity, type Status } from '../lib/types'
 import { EditableCell } from '../components/EditableCell'
-import { ReportDrawer } from '../components/ReportDrawer'
-import { ProjectChips, ProjectFilter } from '../components/ProjectFilter'
-import { Button, EmptyState, fmtDate, Mono, PageHeader, Skeleton, StatusBadge } from '../components/ui'
+import { ReportModal } from '../components/ReportModal'
+import { ProjectChips } from '../components/ProjectFilter'
+import { Button, EmptyState, fmtDate, Mono, PageHeader, Skeleton, StatTile, StatusBadge } from '../components/ui'
 import { notify } from '../lib/toast'
 
 type SortKey = 'id' | 'createdAt' | 'title' | 'severity' | 'status'
@@ -129,7 +129,7 @@ export function AdminTracker() {
   return (
     <>
       <PageHeader
-        eyebrow={<span className="inline-block w-64 max-w-full"><ProjectFilter /></span>}
+        eyebrow={label}
         title="Tracker"
         subtitle={loaded ? `${rows.length} of ${reports.filter((r) => matches(r.clientId)).length} reports${isAll ? ' in all projects' : ` in ${label}`}` : undefined}
         actions={
@@ -141,6 +141,12 @@ export function AdminTracker() {
       />
 
       <ProjectChips />
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" role="group" aria-label="Quick filters">
+        {([['New', 'New', 'Waiting for triage'], ['In progress', 'In progress', 'Being worked on'], ['Needs client input', 'Waiting on client', 'We asked them something'], ['Ready to verify', 'Ready to verify', 'Fixed, awaiting the client']] as const).map(([status, name, hint]) => (
+          <StatTile key={status} label={name} hint={hint} value={loaded ? reports.filter((r) => matches(r.clientId) && r.status === status).length : '–'} active={filters.status === status} onClick={() => f({ status: filters.status === status ? '' : status })} />
+        ))}
+      </div>
 
       {showColumns && (
         <fieldset className="mb-4 rounded-card border border-line bg-surface p-4">
@@ -253,7 +259,7 @@ export function AdminTracker() {
           </table>
         </div>
       )}
-      {open && <ReportDrawer report={open} onClose={() => setParams({}, { replace: true })} />}
+      {open && <ReportModal report={open} onClose={() => setParams({}, { replace: true })} />}
     </>
   )
 }

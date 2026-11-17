@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../lib/auth'
 import { ApiError } from '../lib/api'
 import { notify } from '../lib/toast'
-import { Avatar } from '../components/ProfileMenu'
+import { Avatar } from '../components/Avatar'
 import { PasswordField, PasswordRules, passwordChecks } from '../components/PasswordField'
 import { Button, PageHeader } from '../components/ui'
 

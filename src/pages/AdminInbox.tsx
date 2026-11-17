@@ -4,7 +4,7 @@ import { CheckCheck, MessageCircleQuestion, Search as SearchIcon } from 'lucide-
 import { useProject } from '../lib/project'
 import { setStatus, updateFields, useReports, useReportsLoaded } from '../lib/store'
 import { hasSeverity, SEVERITIES, type Report, type Severity } from '../lib/types'
-import { ReportDrawer } from '../components/ReportDrawer'
+import { ReportModal } from '../components/ReportModal'
 import { Button, EmptyState, fmtDateTime, KindTag, Mono, PageHeader, SeverityBadge, Skeleton } from '../components/ui'
 
 type Sort = 'newest' | 'oldest' | 'severity'
@@ -87,7 +87,7 @@ export function AdminInbox() {
           ))}
         </ul>
       )}
-      {open && <ReportDrawer report={open} onClose={() => setParams({}, { replace: true })} />}
+      {open && <ReportModal report={open} onClose={() => setParams({}, { replace: true })} />}
     </>
   )
 }

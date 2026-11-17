@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Inbox, Search } from 'lucide-react'
 import { useClientProject } from '../lib/clientProject'
 import { moveItem, useRoadmap, useRoadmapLoaded } from '../lib/roadmap'
@@ -7,8 +7,9 @@ import { useReports, useReportsLoaded } from '../lib/store'
 import { buildEntries, countEntries, type Entry } from '../lib/entries'
 import { ROADMAP_STATES, STATUSES, type RoadmapState } from '../lib/types'
 import { ItemsBoard } from '../components/ItemsBoard'
-import { ItemDrawer } from '../components/ItemDrawer'
-import { Button, EmptyState, fmtDate, KindTag, Mono, PageHeader, Skeleton, StageBadge, StatusBadge } from '../components/ui'
+import { ItemModal } from '../components/ItemModal'
+import { ReportDetail } from './ReportDetail'
+import { Button, EmptyState, fmtDate, KindTag, Mono, PageHeader, Segmented, Skeleton, StageBadge, StatTile, StatusBadge } from '../components/ui'
 
 type View = 'list' | 'board'
 type Type = 'all' | 'fixes' | 'roadmap'
@@ -40,6 +41,9 @@ export function ClientHome() {
     q: params.get('q') ?? '',
   }))
   const [openItem, setOpenItem] = useState<string | null>(null)
+  // /reports/:id opens that item over the list, so the list and its filters stay where they were.
+  const { id: openId } = useParams()
+  const navigate = useNavigate()
   const { view, type, show, status, q } = f
   const set = (patch: Partial<typeof f>) => setF((prev) => ({ ...prev, ...patch }))
 
@@ -61,24 +65,7 @@ export function ClientHome() {
   const drawerEntry = all.find((e) => e.item?.id === openItem)
 
   const tile = (id: Show, label: string, n: number, hint: string) => (
-    <button
-      type="button"
-      onClick={() => set({ show: show === id ? 'all' : id })}
-      aria-pressed={show === id}
-      className={`rounded-card border p-4 text-left ${show === id ? 'border-action bg-surface ring-2 ring-action' : 'border-line bg-surface hover:border-control'}`}
-    >
-      <span className="block text-3xl font-semibold tabular-nums" aria-label={loaded ? `${n}` : 'loading'}>{loaded ? n : '–'}</span>
-      <span className="block font-semibold">{label}</span>
-      <span className="block text-sm text-muted">{hint}</span>
-    </button>
-  )
-
-  const segment = <T extends string>(label: string, value: T, options: { id: T; label: string }[], on: (v: T) => void) => (
-    <div role="group" aria-label={label} className="inline-flex rounded-control border border-control bg-surface p-0.5">
-      {options.map((o) => (
-        <button key={o.id} type="button" onClick={() => on(o.id)} aria-pressed={value === o.id} className={`min-h-10 rounded-[.25rem] px-3 font-semibold md:min-h-8 ${value === o.id ? 'bg-forest text-cream' : 'text-ink hover:bg-canvas'}`}>{o.label}</button>
-      ))}
-    </div>
+    <StatTile label={label} hint={hint} value={<span aria-label={loaded ? `${n}` : 'loading'}>{loaded ? n : '–'}</span>} active={show === id} onClick={() => set({ show: show === id ? 'all' : id })} />
   )
 
   return (
@@ -92,8 +79,8 @@ export function ClientHome() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        {segment<View>('View', view, [{ id: 'list', label: 'List' }, { id: 'board', label: 'Card' }], (v) => set({ view: v }))}
-        {segment<Type>('Show', type, TYPES, (v) => set({ type: v }))}
+        <Segmented<View> label="View" value={view} options={[{ id: 'list', label: 'List' }, { id: 'board', label: 'Card' }]} onChange={(v) => set({ view: v })} />
+        <Segmented<Type> label="Show" value={type} options={TYPES} onChange={(v) => set({ type: v })} />
         <select className="input !w-auto" aria-label="Filter by status" value={status} onChange={(e) => set({ status: e.target.value })}>
           <option value="">Any status</option>
           <optgroup label="Fix status">{STATUSES.map((s) => <option key={s} value={`s:${s}`}>{s}</option>)}</optgroup>
@@ -143,7 +130,7 @@ export function ClientHome() {
         </ul>
       )}
       {filtered && rows.length > 0 && <p className="mt-2 text-sm text-muted">{rows.length} of {all.length} shown.</p>}
-      {drawerEntry?.item && <ItemDrawer item={drawerEntry.item} onClose={() => setOpenItem(null)} />}
+      {openId ? <ReportDetail id={openId} onClose={() => navigate('/reports')} /> : drawerEntry?.item && <ItemModal item={drawerEntry.item} onClose={() => setOpenItem(null)} />}
     </>
   )
 }
