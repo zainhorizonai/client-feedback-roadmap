@@ -14,7 +14,7 @@ const blank = (clientId: string): Draft => ({ clientId, title: '', description: 
 const fromItem = (i: RoadmapItem): Draft => ({ clientId: i.clientId, title: i.title, description: i.description, state: i.state, targetWindow: i.targetWindow, clientUpdate: i.clientUpdate, published: !!i.published, reportIds: (i.reports ?? []).map((r) => r.id) })
 
 export function AdminRoadmap() {
-  const { projects, selectedId, selected } = useProject()
+  const { projects, matches, label, single, selectedIds } = useProject()
   const all = useRoadmap()
   const loaded = useRoadmapLoaded()
   const reports = useReports()
@@ -22,21 +22,21 @@ export function AdminRoadmap() {
   const [editing, setEditing] = useState<{ item: RoadmapItem | null } | null>(null)
   const [preview, setPreview] = useState(false)
 
-  const items = useMemo(() => all.filter((i) => !selectedId || i.clientId === selectedId), [all, selectedId])
+  const items = useMemo(() => all.filter((i) => matches(i.clientId)), [all, matches, selectedIds])
   const openReport = reports.find((r) => r.id === params.get('report')) ?? null
   // Client preview only makes sense for one project, and shows exactly what its people see.
-  useEffect(() => { if (!selectedId) setPreview(false) }, [selectedId])
+  useEffect(() => { if (!single) setPreview(false) }, [single])
   const previewItems = items.filter((i) => i.published)
 
   return (
     <>
       <PageHeader
-        eyebrow={selected?.name ?? 'All projects'}
+        eyebrow={label}
         title="Roadmap"
         subtitle="Plan work for clients. Nothing is visible to them until you publish it."
         actions={
           <>
-            <Button variant="secondary" onClick={() => setPreview((p) => !p)} disabled={!selectedId} aria-pressed={preview} title={selectedId ? undefined : 'Choose a project to preview what its client sees'}>
+            <Button variant="secondary" onClick={() => setPreview((p) => !p)} disabled={!single} aria-pressed={preview} title={single ? undefined : 'Choose one project to preview what its client sees'}>
               <Eye className="h-4 w-4" aria-hidden="true" />{preview ? 'Back to editing' : 'Client preview'}
             </Button>
             <Button onClick={() => setEditing({ item: null })}><Plus className="h-4 w-4" aria-hidden="true" />Add roadmap item</Button>
@@ -44,9 +44,9 @@ export function AdminRoadmap() {
         }
       />
 
-      {preview && selected && (
+      {preview && single && (
         <p className="mb-4 rounded-card border border-line bg-surface px-4 py-3" role="status">
-          This is what <strong>{selected.name}</strong> sees: published items only, with no private notes or reporter details. {previewItems.length} of {items.length} items are published.
+          This is what <strong>{single.name}</strong> sees: published items only, with no private notes or reporter details. {previewItems.length} of {items.length} items are published.
         </p>
       )}
 
@@ -61,13 +61,13 @@ export function AdminRoadmap() {
           items={items}
           states={ROADMAP_STATES}
           mode="admin"
-          showProject={!selectedId}
+          showProject={!single}
           onOpen={(item) => setEditing({ item })}
           onMove={(item, state) => updateItem(item.id, { state }, `${item.title} moved to ${state}.`)}
         />
       )}
 
-      {editing && <ItemEditor item={editing.item} defaultClientId={selectedId || projects[0]?.id || ''} onClose={() => setEditing(null)} onOpenReport={(id) => setParams({ report: id }, { replace: true })} />}
+      {editing && <ItemEditor item={editing.item} defaultClientId={single?.id ?? projects.find((p) => matches(p.id))?.id ?? ''} onClose={() => setEditing(null)} onOpenReport={(id) => setParams({ report: id }, { replace: true })} />}
       {openReport && <ReportDrawer report={openReport} onClose={() => setParams({}, { replace: true })} />}
     </>
   )

@@ -121,6 +121,8 @@ const SCHEMA = [
   // Email and password accounts. Links in email now only set or reset a password; they no longer sign anyone in.
   'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT',
   'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TEXT',
+  // Removing a person ends their access but keeps their name on what they reported. Set means removed.
+  'ALTER TABLE users ADD COLUMN IF NOT EXISTS removed_at TEXT',
   "ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'login'",
   'ALTER TABLE history ADD COLUMN IF NOT EXISTS from_value TEXT',
   'ALTER TABLE history ADD COLUMN IF NOT EXISTS to_value TEXT',

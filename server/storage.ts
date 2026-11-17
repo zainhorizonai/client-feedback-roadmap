@@ -37,6 +37,8 @@ export interface Storage {
   clientUpload?(request: Request, body: unknown, reportId: string): Promise<unknown>
   /** blob mode: confirm an uploaded blob exists and is acceptable. Null when it does not. */
   inspect?(pathname: string): Promise<Stored | null>
+  /** Deletes stored videos. Best effort: a file that is already gone is not an error. */
+  remove(storedPaths: string[]): Promise<void>
   /** Responds with the video, honouring Range where the driver serves bytes itself. */
   serve(storedPath: string, mime: string, range: string | undefined): Promise<Response>
 }
@@ -71,6 +73,10 @@ function localStorageDriver(): Storage {
         throw new Error('Empty upload')
       }
       return { path: file, size }
+    },
+
+    async remove(paths) {
+      for (const p of paths) fs.rmSync(path.join(dir, path.basename(p)), { force: true })
     },
 
     async serve(file, mime, rangeHeader) {
@@ -177,6 +183,11 @@ function blobDriver(): Storage {
       } catch {
         return null
       }
+    },
+
+    async remove(paths) {
+      const { del } = await import('@vercel/blob')
+      if (paths.length) await del(paths, auth).catch((e) => console.error('[storage] could not delete some videos:', e instanceof Error ? e.message : e))
     },
 
     async serve(pathname) {

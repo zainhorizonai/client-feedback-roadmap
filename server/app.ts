@@ -180,7 +180,7 @@ async function mailAdmins(subject: string, lines: string[], id: string, url = ad
 }
 /** Whoever sent the item gets the email. Items added by the team go to everyone at that client. */
 async function clientRecipients(r: ReportRow): Promise<string[]> {
-  if (r.reporter_role === 'client') return [r.reporter_email]
+  if (r.reporter_role === 'client' && (await one('SELECT 1 AS x FROM users WHERE id = $1 AND removed_at IS NULL', r.reporter_id))) return [r.reporter_email]
   return (await all<{ email: string }>("SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.client_id = $1 AND u.role = 'client'", r.client_id)).map((u) => u.email)
 }
 const mailClient = async (r: ReportRow, subject: string, lines: string[]) =>
@@ -895,11 +895,24 @@ app.delete('/api/admin/roadmap/:id', async (c) => {
 app.get('/api/admin/clients', async (c) => {
   requireAdmin(c)
   const clients = await all<{ id: string; name: string; created_at: string }>('SELECT id, name, created_at FROM clients ORDER BY name')
-  const users = await all<{ id: string; email: string; name: string; client_id: string; has_password: boolean }>(
-    "SELECT u.id, u.email, u.name, m.client_id, (u.password_hash IS NOT NULL) AS has_password FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.role = 'client' ORDER BY u.name",
+  const users = await all<{ id: string; email: string; name: string; client_id: string; has_password: boolean; created_at: string }>(
+    `SELECT u.id, u.email, u.name, m.client_id, (u.password_hash IS NOT NULL) AS has_password, u.created_at
+       FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.role = 'client' AND u.removed_at IS NULL ORDER BY u.name`,
   )
+  const reports = await all<{ client_id: string; total: number; open: number }>(
+    "SELECT client_id, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status <> 'Resolved')::int AS open FROM reports WHERE submitted_at IS NOT NULL GROUP BY client_id",
+  )
+  const items = await all<{ client_id: string; n: number }>('SELECT client_id, COUNT(*)::int AS n FROM roadmap_items GROUP BY client_id')
   return c.json({
-    clients: clients.map((cl) => ({ id: cl.id, name: cl.name, createdAt: cl.created_at, users: users.filter((u) => u.client_id === cl.id).map(({ id, email, name, has_password }) => ({ id, email, name, hasPassword: has_password === true })) })),
+    clients: clients.map((cl) => ({
+      id: cl.id,
+      name: cl.name,
+      createdAt: cl.created_at,
+      reportCount: reports.find((r) => r.client_id === cl.id)?.total ?? 0,
+      openCount: reports.find((r) => r.client_id === cl.id)?.open ?? 0,
+      itemCount: items.find((i) => i.client_id === cl.id)?.n ?? 0,
+      users: users.filter((u) => u.client_id === cl.id).map((u) => ({ id: u.id, email: u.email, name: u.name, hasPassword: u.has_password === true, invitedAt: u.created_at })),
+    })),
   })
 })
 
@@ -920,9 +933,20 @@ app.post('/api/admin/clients/:id/users', async (c) => {
   const name = text(body.name, 'name', 100, true)
   if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address')
   // Someone who already has an account can be added to another project. They keep one sign-in.
-  const existing = await one<{ id: string; role: string; name: string }>('SELECT id, role, name FROM users WHERE email = $1', email)
+  const existing = await one<{ id: string; role: string; name: string; removed_at: string | null }>('SELECT id, role, name, removed_at FROM users WHERE email = $1', email)
   let id: string
   let addedToExisting = false
+  if (existing?.removed_at) {
+    // Someone who was removed and is invited again starts fresh: new invitation, new password.
+    if (existing.role !== 'client') throw new HttpError(409, 'This address belongs to a team member.')
+    id = existing.id
+    await batch([
+      ['UPDATE users SET removed_at = NULL, password_hash = NULL, name = $1, client_id = $2 WHERE id = $3', [name, client.id, id]],
+      ['INSERT INTO memberships (user_id, client_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [id, client.id]],
+    ])
+    const sent = (await sendPasswordEmail({ id, email, name }, 'invite', client.name)).sent
+    return c.json({ user: { id, email, name }, emailSent: sent, addedToExisting: false, reinstated: true }, 201)
+  }
   if (existing) {
     if (existing.role !== 'client') throw new HttpError(409, 'This address belongs to a team member.')
     if (await one('SELECT 1 AS x FROM memberships WHERE user_id = $1 AND client_id = $2', existing.id, client.id)) throw new HttpError(409, 'They are already in this project.')
@@ -949,6 +973,80 @@ app.post('/api/admin/clients/:id/users', async (c) => {
   return c.json({ user: { id, email, name: existing?.name ?? name }, emailSent, addedToExisting }, 201)
 })
 
+// Give someone the name you know them by.
+app.patch('/api/admin/users/:id', async (c) => {
+  requireAdmin(c)
+  const name = text((await json(c)).name, 'name', 100, true)
+  const u = await one<{ id: string; email: string }>("SELECT id, email FROM users WHERE id = $1 AND role = 'client' AND removed_at IS NULL", c.req.param('id'))
+  if (!u) throw new HttpError(404, 'Person not found')
+  await run('UPDATE users SET name = $1 WHERE id = $2', name, u.id)
+  return c.json({ user: { id: u.id, email: u.email, name } })
+})
+
+/**
+ * Take someone out of one project, whether or not they ever accepted. If that was their last project, their access
+ * ends altogether and every session is signed out. What they reported stays, with their name on it.
+ */
+app.delete('/api/admin/clients/:clientId/users/:userId', async (c) => {
+  requireAdmin(c)
+  const { clientId, userId } = c.req.param()
+  const m = await one<{ name: string; email: string }>(
+    `SELECT u.name, u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.client_id = $1 AND m.user_id = $2 AND u.role = 'client' AND u.removed_at IS NULL`,
+    clientId, userId,
+  )
+  if (!m) throw new HttpError(404, 'That person is not in this project')
+  const other = await one<{ client_id: string }>('SELECT client_id FROM memberships WHERE user_id = $1 AND client_id <> $2 LIMIT 1', userId, clientId)
+  const stmts: Stmt[] = [['DELETE FROM memberships WHERE user_id = $1 AND client_id = $2', [userId, clientId]]]
+  if (other) {
+    stmts.push(['UPDATE users SET client_id = $1 WHERE id = $2 AND client_id = $3', [other.client_id, userId, clientId]])
+  } else {
+    stmts.push(
+      ['UPDATE users SET removed_at = $1, password_hash = NULL, client_id = NULL WHERE id = $2', [now(), userId]],
+      ['DELETE FROM sessions WHERE user_id = $1', [userId]],
+      ['DELETE FROM login_tokens WHERE user_id = $1', [userId]],
+    )
+  }
+  await batch(stmts)
+  return c.json({ ok: true, accountRemoved: !other })
+})
+
+/**
+ * Delete a project and everything in it: its reports, history, roadmap and videos. People who belonged only to it
+ * lose their access. The name must be typed back exactly, so this cannot happen by accident.
+ */
+app.post('/api/admin/clients/:id/delete', async (c) => {
+  requireAdmin(c)
+  const client = await one<{ id: string; name: string }>('SELECT id, name FROM clients WHERE id = $1', c.req.param('id'))
+  if (!client) throw new HttpError(404, 'Project not found')
+  if (text((await json(c)).confirm, 'confirm', 200) !== client.name) throw new HttpError(400, 'Type the project name exactly to confirm.')
+
+  const orphans = (await all<{ id: string }>(
+    `SELECT m.user_id AS id FROM memberships m JOIN users u ON u.id = m.user_id
+      WHERE m.client_id = $1 AND u.role = 'client' AND NOT EXISTS (SELECT 1 FROM memberships m2 WHERE m2.user_id = m.user_id AND m2.client_id <> $1)`,
+    client.id,
+  )).map((o) => o.id)
+  const videos = (await all<{ video_path: string }>("SELECT video_path FROM reports WHERE client_id = $1 AND video_path IS NOT NULL AND video_path <> ''", client.id)).map((v) => v.video_path)
+  const counts = await one<{ reports: number; items: number }>(
+    'SELECT (SELECT COUNT(*)::int FROM reports WHERE client_id = $1) AS reports, (SELECT COUNT(*)::int FROM roadmap_items WHERE client_id = $1) AS items',
+    client.id,
+  )
+  const list = `{${orphans.map((i) => `"${i}"`).join(',')}}`
+
+  await batch([
+    // Anyone whose only project this was loses access for good.
+    ['UPDATE users SET removed_at = $1, password_hash = NULL WHERE id = ANY($2::text[])', [now(), list]],
+    ['DELETE FROM sessions WHERE user_id = ANY($1::text[])', [list]],
+    ['DELETE FROM login_tokens WHERE user_id = ANY($1::text[])', [list]],
+    ['UPDATE users SET client_id = NULL WHERE client_id = $1', [client.id]],
+    ['DELETE FROM roadmap_items WHERE client_id = $1', [client.id]],
+    ['DELETE FROM reports WHERE client_id = $1', [client.id]],
+    ['DELETE FROM clients WHERE id = $1', [client.id]], // memberships go with it
+  ])
+  // The records are gone. Now the files, which can fail without harming anything.
+  await getStorage().remove(videos).catch((e) => console.error('[storage] could not delete videos:', e instanceof Error ? e.message : e))
+  return c.json({ ok: true, deleted: { reports: counts?.reports ?? 0, items: counts?.items ?? 0, people: orphans.length, videos: videos.length } })
+})
+
 // ---------- scheduled housekeeping (Vercel Cron) ----------
 
 export async function housekeeping() {
@@ -973,7 +1071,7 @@ app.get('/api/cron/housekeeping', async (c) => {
 // Send someone a link to set or reset their password. Useful when an invitation email did not arrive.
 app.post('/api/admin/users/:id/password-link', async (c) => {
   requireAdmin(c)
-  const u = await one<{ id: string; email: string; name: string; password_hash: string | null }>('SELECT id, email, name, password_hash FROM users WHERE id = $1', c.req.param('id'))
+  const u = await one<{ id: string; email: string; name: string; password_hash: string | null }>('SELECT id, email, name, password_hash FROM users WHERE id = $1 AND removed_at IS NULL', c.req.param('id'))
   if (!u) throw new HttpError(404, 'Person not found')
   const { sent } = await sendPasswordEmail(u, u.password_hash ? 'reset' : 'invite')
   return c.json({ emailSent: sent, hadPassword: !!u.password_hash })

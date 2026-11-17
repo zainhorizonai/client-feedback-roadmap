@@ -105,7 +105,7 @@ async function startSession(c: Context, userId: string): Promise<AuthUser | null
 
 /** Email and password sign-in. Null for a wrong password, an unknown address, or an account with no password yet. */
 export async function login(c: Context, email: string, password: string): Promise<AuthUser | null> {
-  const u = await one<{ id: string; password_hash: string | null }>('SELECT id, password_hash FROM users WHERE email = $1', email)
+  const u = await one<{ id: string; password_hash: string | null }>('SELECT id, password_hash FROM users WHERE email = $1 AND removed_at IS NULL', email)
   const ok = await verifyPassword(password, u?.password_hash ?? (await getDummyHash()))
   if (!u || !u.password_hash || !ok) return null
   return startSession(c, u.id)
@@ -149,7 +149,7 @@ export async function sendPasswordEmail(user: { id: string; email: string; name:
 export async function requestPasswordEmail(email: string): Promise<string | null> {
   // Addresses listed in ADMIN_EMAILS become admins the first time they ask.
   if (config.adminEmails.includes(email)) await ensureAdminUser(email)
-  const user = await one<{ id: string; email: string; name: string; password_hash: string | null }>('SELECT id, email, name, password_hash FROM users WHERE email = $1', email)
+  const user = await one<{ id: string; email: string; name: string; password_hash: string | null }>('SELECT id, email, name, password_hash FROM users WHERE email = $1 AND removed_at IS NULL', email)
   if (!user) {
     await logEmailEvent([email], 'Password link requested', 'Nothing sent: no account for this address. It is not in ADMIN_EMAILS and has not been invited.')
     return null
@@ -161,7 +161,7 @@ export async function requestPasswordEmail(email: string): Promise<string | null
 export async function checkPasswordToken(token: string): Promise<{ purpose: TokenPurpose; email: string; name: string } | null> {
   const t = await one<{ purpose: TokenPurpose; email: string; name: string }>(
     `SELECT t.purpose, u.email, u.name FROM login_tokens t JOIN users u ON u.id = t.user_id
-      WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > $2 AND t.purpose IN ('invite', 'reset')`,
+      WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > $2 AND t.purpose IN ('invite', 'reset') AND u.removed_at IS NULL`,
     sha256(token), iso(),
   )
   return t ?? null
@@ -214,7 +214,7 @@ async function loadUserBySession(sid: string): Promise<AuthUser | null> {
             COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name) ORDER BY c.name)
                         FROM memberships m JOIN clients c ON c.id = m.client_id WHERE m.user_id = u.id), '[]'::json) AS projects
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.id_hash = $1 AND s.expires_at > $2`,
+      WHERE s.id_hash = $1 AND s.expires_at > $2 AND u.removed_at IS NULL`,
     sha256(sid), iso(),
   )
   if (!u) return null

@@ -12,7 +12,7 @@ const RANK: Record<Severity, number> = { Blocker: 0, High: 1, Medium: 2, Low: 3 
 
 /** The triage queue: new submissions waiting for a first decision. It shows the same records as the Tracker. */
 export function AdminInbox() {
-  const { selectedId, selected } = useProject()
+  const { matches, label, selectedIds } = useProject()
   const reports = useReports()
   const loaded = useReportsLoaded()
   const [params, setParams] = useSearchParams()
@@ -20,12 +20,12 @@ export function AdminInbox() {
   const [busy, setBusy] = useState<string | null>(null)
 
   const queue = useMemo(() => {
-    const rows = reports.filter((r) => r.status === 'New' && (!selectedId || r.clientId === selectedId))
+    const rows = reports.filter((r) => r.status === 'New' && matches(r.clientId))
     return [...rows].sort((a, b) =>
       sort === 'oldest' ? a.createdAt.localeCompare(b.createdAt)
       : sort === 'severity' ? RANK[a.severity] - RANK[b.severity] || b.createdAt.localeCompare(a.createdAt)
       : b.createdAt.localeCompare(a.createdAt))
-  }, [reports, selectedId, sort])
+  }, [reports, matches, selectedIds, sort])
   const open = reports.find((r) => r.id === params.get('report')) ?? null
 
   async function triage(r: Report, status: 'Triaging' | 'Needs client input') {
@@ -37,7 +37,7 @@ export function AdminInbox() {
   return (
     <>
       <PageHeader
-        eyebrow={selected?.name ?? 'All projects'}
+        eyebrow={label}
         title="Inbox"
         subtitle={loaded ? `${queue.length} new ${queue.length === 1 ? 'report' : 'reports'} waiting for triage` : undefined}
         actions={
@@ -54,7 +54,7 @@ export function AdminInbox() {
 
       {!loaded ? <Skeleton /> : queue.length === 0 ? (
         <EmptyState icon={<CheckCheck className="h-9 w-9" />} title="Inbox clear">
-          No new reports{selected ? ` for ${selected.name}` : ''}. Everything else is in the Tracker.
+          No new reports in {label.toLowerCase() === 'all projects' ? 'any project' : label}. Everything else is in the Tracker.
         </EmptyState>
       ) : (
         <ul className="space-y-3">

@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { Inbox, LogOut, Map, Rows3, UserRound, Users, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../lib/auth'
-import { useProject } from '../lib/project'
+import { ProjectFilter } from './ProjectFilter'
 import { useReportsSync } from '../lib/store'
 import { useRoadmapSync } from '../lib/roadmap'
 import { Toasts } from '../lib/toast'
@@ -12,20 +12,11 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/admin/roadmap', label: 'Roadmap', icon: Map },
 ]
 
-function ProjectSelect({ id }: { id: string }) {
-  const { projects, selectedId, select } = useProject()
+function Projects({ id }: { id: string }) {
   return (
     <div>
-      <label htmlFor={id} className="mb-1 block text-xs font-semibold uppercase tracking-wide text-cream/70">Project</label>
-      <select
-        id={id}
-        value={selectedId}
-        onChange={(e) => select(e.target.value)}
-        className="min-h-11 w-full rounded-control border border-cream/40 bg-forest px-2 text-cream md:min-h-9"
-      >
-        <option value="">All projects</option>
-        {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select>
+      <p id={id} className="mb-1 block text-xs font-semibold uppercase tracking-wide text-cream/70">Projects</p>
+      <ProjectFilter tone="dark" />
     </div>
   )
 }
@@ -46,7 +37,7 @@ export function AdminShell() {
         <Link to="/admin/inbox" aria-label="SEAM home" className="mb-6 block px-1">
           <img src="/brand/seam-logo-reverse.svg" alt="" className="h-9 w-auto" />
         </Link>
-        <ProjectSelect id="project-desktop" />
+        <Projects id="project-desktop" />
         <nav className="mt-5 space-y-1" aria-label="Workspace">
           {NAV.map((n) => <NavLink key={n.to} to={n.to} className={link}><n.icon className="h-4 w-4" aria-hidden="true" />{n.label}</NavLink>)}
         </nav>
@@ -64,7 +55,7 @@ export function AdminShell() {
       <header className="on-dark bg-forest text-cream lg:hidden">
         <div className="flex items-center gap-3 px-4 py-3">
           <Link to="/admin/inbox" aria-label="SEAM home" className="shrink-0"><img src="/brand/seam-mark-reverse.svg" alt="" className="h-9 w-9" /></Link>
-          <div className="min-w-0 flex-1"><ProjectSelect id="project-compact" /></div>
+          <div className="min-w-0 flex-1"><Projects id="project-compact" /></div>
           <button onClick={signOut} aria-label="Sign out" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-control hover:bg-cream/10"><LogOut className="h-5 w-5" aria-hidden="true" /></button>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-3 pb-3" aria-label="Workspace">

@@ -6,6 +6,7 @@ import { setStatus, updateFields, useReports, useReportsLoaded } from '../lib/st
 import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Report, type Severity, type Status } from '../lib/types'
 import { EditableCell } from '../components/EditableCell'
 import { ReportDrawer } from '../components/ReportDrawer'
+import { ProjectChips, ProjectFilter } from '../components/ProjectFilter'
 import { Button, EmptyState, fmtDate, Mono, PageHeader, Skeleton, StatusBadge } from '../components/ui'
 import { notify } from '../lib/toast'
 
@@ -18,7 +19,7 @@ interface ColumnDef { key: string; label: string; narrow: boolean; sort?: SortKe
 const COLUMNS: ColumnDef[] = [
   { key: 'id', label: 'ID', narrow: true, sort: 'id' },
   { key: 'createdAt', label: 'Submitted', narrow: true, sort: 'createdAt' },
-  { key: 'project', label: 'Project', narrow: false },
+  { key: 'project', label: 'Project', narrow: true },
   { key: 'reporter', label: 'Reporter', narrow: false },
   { key: 'kind', label: 'Type', narrow: true },
   { key: 'title', label: 'Title', narrow: true, sort: 'title' },
@@ -43,7 +44,7 @@ const saveJson = (key: string, v: unknown) => { try { localStorage.setItem(key, 
 const csvCell = (v: string) => `"${v.replace(/"/g, '""')}"`
 
 export function AdminTracker() {
-  const { projects, selectedId, select, selected } = useProject()
+  const { matches, label, selectedIds, isAll } = useProject()
   const reports = useReports()
   const loaded = useReportsLoaded()
   const [params, setParams] = useSearchParams()
@@ -69,7 +70,7 @@ export function AdminTracker() {
     const needle = filters.q.trim().toLowerCase()
     const since = filters.days ? Date.now() - Number(filters.days) * 864e5 : 0
     const list = reports.filter((r) =>
-      (!selectedId || r.clientId === selectedId) &&
+      matches(r.clientId) &&
       (!filters.kind || r.kind === filters.kind) && (!filters.status || r.status === filters.status) && (!filters.severity || r.severity === filters.severity) &&
       (!since || new Date(r.createdAt).getTime() >= since) &&
       (!needle || [r.id, r.title, r.description, r.reporterName, r.clientName, r.pageUrl].some((v) => v.toLowerCase().includes(needle))))
@@ -83,7 +84,7 @@ export function AdminTracker() {
         default: return sign * a.createdAt.localeCompare(b.createdAt)
       }
     })
-  }, [reports, selectedId, filters, sort, dir])
+  }, [reports, matches, selectedIds, filters, sort, dir])
 
   const open = reports.find((r) => r.id === params.get('report')) ?? null
   const openReport = (id: string) => setParams({ report: id }, { replace: true })
@@ -128,16 +129,9 @@ export function AdminTracker() {
   return (
     <>
       <PageHeader
-        eyebrow={
-          <label className="inline-flex items-center gap-2"><span>Project</span>
-            <select className="input !w-auto !min-h-8 font-semibold" value={selectedId} onChange={(e) => select(e.target.value)}>
-              <option value="">All projects</option>
-              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </label>
-        }
+        eyebrow={<span className="inline-block w-64 max-w-full"><ProjectFilter /></span>}
         title="Tracker"
-        subtitle={loaded ? `${rows.length} of ${reports.filter((r) => !selectedId || r.clientId === selectedId).length} reports${selected ? ` in ${selected.name}` : ''}` : undefined}
+        subtitle={loaded ? `${rows.length} of ${reports.filter((r) => matches(r.clientId)).length} reports${isAll ? ' in all projects' : ` in ${label}`}` : undefined}
         actions={
           <>
             <Button variant="secondary" onClick={() => setShowColumns((s) => !s)} aria-expanded={showColumns}><Columns3 className="h-4 w-4" aria-hidden="true" />Columns</Button>
@@ -145,6 +139,8 @@ export function AdminTracker() {
           </>
         }
       />
+
+      <ProjectChips />
 
       {showColumns && (
         <fieldset className="mb-4 rounded-card border border-line bg-surface p-4">
@@ -193,7 +189,7 @@ export function AdminTracker() {
       {!loaded ? <Skeleton rows={8} /> : rows.length === 0 ? (
         active
           ? <EmptyState title="No reports match these filters" action={<Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>Clear filters</Button>} />
-          : <EmptyState title={selected ? `No reports in ${selected.name} yet` : 'No reports yet'}>Reports sent by clients appear here as soon as they are submitted.</EmptyState>
+          : <EmptyState title={isAll ? 'No reports yet' : `No reports in ${label} yet`}>Reports sent by clients appear here as soon as they are submitted.</EmptyState>
       ) : (
         // The table scrolls inside this box, so the page itself never scrolls sideways.
         <div className="max-h-[calc(100vh-17rem)] min-h-64 overflow-auto rounded-card border border-line bg-surface">

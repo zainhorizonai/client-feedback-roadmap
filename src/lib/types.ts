@@ -31,7 +31,11 @@ export interface User {
 export interface ClientOrg {
   id: string
   name: string
-  users: { id: string; email: string; name: string; hasPassword?: boolean }[]
+  /** Admin only: how much is in the project. */
+  reportCount?: number
+  openCount?: number
+  itemCount?: number
+  users: { id: string; email: string; name: string; hasPassword?: boolean; invitedAt?: string }[]
 }
 
 export interface HistoryEntry {

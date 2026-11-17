@@ -224,6 +224,7 @@ describe('Blob upload mode', () => {
         return { type: 'blob.generate-client-token', clientToken: 'fake-token' }
       },
       async inspect(pathname) { return store.get(pathname) ?? null },
+      async remove() {},
       async serve(pathname) {
         return new Response(null, { status: 302, headers: { Location: `https://blob.test/signed/${pathname}?sig=abc` } })
       },
@@ -1127,5 +1128,173 @@ describe('reopening and editing a ticket', () => {
     const { config } = await import('../config.js')
     const { setMailTransportForTests } = await import('../email.js')
     setMailTransportForTests(null); config.emailProvider = 'console'; config.smtpUser = ''
+  })
+})
+
+describe('managing people and projects as an admin', () => {
+  const admin = new Client()
+  let zed = ''
+  let yank = ''
+
+  const invite = async (projectId: string, email: string, name: string) => (await admin.json('POST', `/api/admin/clients/${projectId}/users`, { email, name }))
+  const people = async (projectId: string) => (((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === projectId)!.users as Json[])
+  const idOf = async (projectId: string, email: string) => (await people(projectId)).find((u) => u.email === email)?.id as string
+
+  before(async () => {
+    await run('DELETE FROM rate_hits')
+    await admin.signIn('admin@test.com')
+    zed = (await admin.json('POST', '/api/admin/clients', { name: 'Zed Co' })).data.client.id
+    yank = (await admin.json('POST', '/api/admin/clients', { name: 'Yank Co' })).data.client.id
+  })
+
+  it('shows each person with when they were invited and whether they have accepted', async () => {
+    assert.equal((await invite(zed, 'pat@zed.com', 'Pat')).status, 201)
+    const pat = (await people(zed)).find((u) => u.email === 'pat@zed.com')!
+    assert.equal(pat.hasPassword, false, 'invited, not accepted yet')
+    assert.match(pat.invitedAt, /^\d{4}-\d{2}-\d{2}T/)
+    await new Client().signIn('pat@zed.com')
+    assert.equal((await people(zed)).find((u) => u.email === 'pat@zed.com')!.hasPassword, true, 'accepted once a password is set')
+  })
+
+  it('counts a project\'s reports, open reports and roadmap cards', async () => {
+    const pat = new Client()
+    await pat.signIn('pat@zed.com')
+    const a = (await pat.json('POST', '/api/reports', { title: 'One', clientId: zed, withVideo: false })).data.report.id
+    await pat.json('POST', '/api/reports', { title: 'Two', clientId: zed, withVideo: false })
+    await pat.json('POST', '/api/reports', { title: 'Idea', clientId: zed, kind: 'Feature request', withVideo: false })
+    await pat.json('POST', `/api/reports/${a}/approve`, {})
+    const z = ((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === zed)!
+    assert.equal(z.reportCount, 3)
+    assert.equal(z.openCount, 2)
+    assert.equal(z.itemCount, 1, 'the feature request has its card')
+    const y = ((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).find((c) => c.id === yank)!
+    assert.equal(y.reportCount, 0)
+  })
+
+  it('renames a person, and the new name shows on what they reported', async () => {
+    const id = await idOf(zed, 'pat@zed.com')
+    assert.equal((await admin.json('PATCH', `/api/admin/users/${id}`, { name: 'Patricia Zed' })).status, 200)
+    assert.equal((await people(zed)).find((u) => u.id === id)!.name, 'Patricia Zed')
+    const rep = ((await admin.json('GET', '/api/reports')).data.reports as Json[]).find((r) => r.title === 'One')!
+    assert.equal(rep.reporterName, 'Patricia Zed')
+    assert.equal((await admin.json('PATCH', `/api/admin/users/${id}`, { name: '   ' })).status, 400)
+    assert.equal((await admin.json('PATCH', '/api/admin/users/nobody', { name: 'X' })).status, 404)
+    const pat = new Client(); await pat.signIn('pat@zed.com')
+    assert.equal((await pat.json('PATCH', `/api/admin/users/${id}`, { name: 'Me' })).status, 403, 'only admins rename people')
+  })
+
+  it('removes someone who never accepted, and they cannot get in afterwards', async () => {
+    await invite(zed, 'pending@zed.com', 'Pending Person')
+    const id = await idOf(zed, 'pending@zed.com')
+    const r = await admin.json('DELETE', `/api/admin/clients/${zed}/users/${id}`)
+    assert.equal(r.status, 200)
+    assert.equal(r.data.accountRemoved, true)
+    assert.equal((await people(zed)).some((u) => u.email === 'pending@zed.com'), false, 'gone from the list')
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'pending@zed.com', password: 'whatever-password-1' })).status, 401)
+    const f = await new Client().json('POST', '/api/auth/forgot', { email: 'pending@zed.com' })
+    assert.equal(f.status, 200)
+    assert.equal(f.data.devLink, undefined, 'a removed person gets no set-password link')
+    assert.equal((await admin.json('POST', `/api/admin/users/${id}/password-link`)).status, 404)
+  })
+
+  it('removes an active person: signed out at once, their reports stay, access is gone', async () => {
+    await invite(zed, 'quinn@zed.com', 'Quinn')
+    const quinn = new Client(); await quinn.signIn('quinn@zed.com')
+    const rid = (await quinn.json('POST', '/api/reports', { title: 'Quinn found this', clientId: zed, withVideo: false })).data.report.id
+    assert.equal((await quinn.json('GET', '/api/me')).data.user.email, 'quinn@zed.com')
+
+    const id = await idOf(zed, 'quinn@zed.com')
+    assert.equal((await admin.json('DELETE', `/api/admin/clients/${zed}/users/${id}`)).data.accountRemoved, true)
+    assert.equal((await quinn.json('GET', '/api/me')).data.user, null, 'their open sessions end immediately')
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'quinn@zed.com', password: TEST_PASSWORD })).status, 401)
+    const kept = (await admin.json('GET', `/api/reports/${rid}`)).data.report
+    assert.equal(kept.reporterName, 'Quinn', 'what they reported keeps their name')
+  })
+
+  it('brings a removed person back with a fresh invitation and a new password', async () => {
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    const mails: Json[] = []
+    config.emailProvider = 'smtp'; config.smtpUser = 'sender@gmail.com'
+    setMailTransportForTests({ sendMail: async (m) => { mails.push(m); return {} } })
+    try {
+      const again = await invite(zed, 'quinn@zed.com', 'Quinn Again')
+      assert.equal(again.status, 201)
+      assert.equal(again.data.reinstated, true)
+      assert.equal(again.data.emailSent, true)
+      const mail = mails.find((m) => m.to.includes('quinn@zed.com'))!
+      assert.equal(mail.subject, 'Set your SEAM password')
+      const token = /token=([^&\s]+)/.exec(mail.text)![1]
+      assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'quinn@zed.com', password: TEST_PASSWORD })).status, 401, 'the old password does not come back')
+      const c = new Client()
+      assert.equal((await c.json('POST', '/api/auth/reset', { token, password: 'a-different-passphrase-77' })).status, 200)
+      assert.equal((await c.json('GET', '/api/reports')).status, 200)
+      assert.ok((await people(zed)).some((u) => u.email === 'quinn@zed.com' && u.name === 'Quinn Again'))
+    } finally {
+      setMailTransportForTests(null); config.emailProvider = 'console'; config.smtpUser = ''
+    }
+  })
+
+  it('removing someone from one project keeps them in their other project', async () => {
+    await invite(zed, 'sam@both.com', 'Sam Both')
+    await invite(yank, 'sam@both.com', 'ignored')
+    const sam = new Client(); await sam.signIn('sam@both.com')
+    const inZed = (await sam.json('POST', '/api/reports', { title: 'Sam in Zed', clientId: zed, withVideo: false })).data.report.id
+    const inYank = (await sam.json('POST', '/api/reports', { title: 'Sam in Yank', clientId: yank, withVideo: false })).data.report.id
+    const id = await idOf(zed, 'sam@both.com')
+    const r = await admin.json('DELETE', `/api/admin/clients/${zed}/users/${id}`)
+    assert.equal(r.data.accountRemoved, false)
+    assert.equal((await sam.json('GET', '/api/me')).data.user.email, 'sam@both.com', 'still signed in')
+    assert.deepEqual(((await sam.json('GET', '/api/me')).data.user.projects as Json[]).map((p) => p.name), ['Yank Co'])
+    assert.equal((await sam.json('GET', `/api/reports/${inZed}`)).status, 404, 'no longer sees the project they left')
+    assert.equal((await sam.json('GET', `/api/reports/${inYank}`)).status, 200)
+    assert.equal((await sam.json('POST', '/api/reports', { title: 'Back in Zed?', clientId: zed, withVideo: false })).status, 400, 'cannot send into it any more')
+  })
+
+  it('refuses nonsense removals', async () => {
+    const id = await idOf(yank, 'sam@both.com')
+    assert.equal((await admin.json('DELETE', `/api/admin/clients/${zed}/users/${id}`)).status, 404, 'not in that project')
+    assert.equal((await admin.json('DELETE', `/api/admin/clients/${yank}/users/nobody`)).status, 404)
+    const adminId = (await one<{ id: string }>("SELECT id FROM users WHERE email = 'admin@test.com'"))!.id
+    assert.equal((await admin.json('DELETE', `/api/admin/clients/${yank}/users/${adminId}`)).status, 404, 'team members are not clients')
+    const sam = new Client(); await sam.signIn('sam@both.com')
+    assert.equal((await sam.json('DELETE', `/api/admin/clients/${yank}/users/${id}`)).status, 403)
+  })
+
+  it('deletes a project with everything in it, and only that project', async () => {
+    const victim = (await admin.json('POST', '/api/admin/clients', { name: 'Doomed Ltd' })).data.client.id
+    await invite(victim, 'only@doomed.com', 'Only Here')
+    await invite(victim, 'sam@both.com', 'x') // Sam is also in Yank
+    const only = new Client(); await only.signIn('only@doomed.com')
+    const withVideo = (await only.json('POST', '/api/reports', { title: 'Has a video', clientId: victim })).data.report.id
+    assert.equal((await upload(only, withVideo)).status, 200)
+    await only.json('POST', '/api/reports', { title: 'A feature', kind: 'Feature request', clientId: victim, withVideo: false })
+    const file = path.join(process.env.DATA_DIR!, 'videos', `${withVideo}.webm`)
+    assert.ok(fs.existsSync(file), 'the video is stored')
+    const sam = new Client(); await sam.signIn('sam@both.com')
+    const samsYank = ((await sam.json('GET', '/api/reports')).data.reports as Json[]).find((r) => r.title === 'Sam in Yank')!.id
+
+    assert.equal((await admin.json('POST', `/api/admin/clients/${victim}/delete`, {})).status, 400, 'needs the name typed')
+    assert.equal((await admin.json('POST', `/api/admin/clients/${victim}/delete`, { confirm: 'doomed ltd' })).status, 400, 'exactly, including capitals')
+    assert.equal((await only.json('POST', `/api/admin/clients/${victim}/delete`, { confirm: 'Doomed Ltd' })).status, 403, 'only admins')
+    assert.equal((await admin.json('POST', '/api/admin/clients/nope/delete', { confirm: 'x' })).status, 404)
+    assert.ok(fs.existsSync(file), 'nothing was deleted by the refused attempts')
+
+    const del = await admin.json('POST', `/api/admin/clients/${victim}/delete`, { confirm: 'Doomed Ltd' })
+    assert.equal(del.status, 200)
+    assert.deepEqual(del.data.deleted, { reports: 2, items: 1, people: 1, videos: 1 })
+
+    assert.equal(((await admin.json('GET', '/api/admin/clients')).data.clients as Json[]).some((c) => c.id === victim), false, 'the project is gone')
+    assert.equal(((await admin.json('GET', '/api/reports')).data.reports as Json[]).some((r) => r.title === 'Has a video' || r.title === 'A feature'), false, 'its reports are gone')
+    assert.equal(((await admin.json('GET', '/api/roadmap')).data.items as Json[]).some((i) => i.clientId === victim), false, 'its roadmap is gone')
+    assert.equal((await all("SELECT 1 FROM history WHERE report_id = $1", withVideo)).length, 0, 'and its history')
+    assert.equal(fs.existsSync(file), false, 'the stored video is deleted too')
+
+    assert.equal((await only.json('GET', '/api/me')).data.user, null, 'someone who only belonged to it is signed out')
+    assert.equal((await new Client().json('POST', '/api/auth/login', { email: 'only@doomed.com', password: TEST_PASSWORD })).status, 401)
+
+    assert.equal((await sam.json('GET', '/api/me')).data.user.email, 'sam@both.com', 'someone in another project too is untouched')
+    assert.equal((await sam.json('GET', `/api/reports/${samsYank}`)).status, 200, 'and so is the other project\'s data')
+    assert.ok((await people(yank)).some((u) => u.email === 'sam@both.com'))
   })
 })
