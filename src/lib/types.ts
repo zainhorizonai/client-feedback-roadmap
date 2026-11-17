@@ -73,6 +73,8 @@ export interface Report {
   roadmapItems?: { id: string; title: string; state: RoadmapState }[]
   /** Who on the team owns it. Admin only. */
   assignee?: { id: string; name: string } | null
+  /** Browser details and, when the page snippet is installed, console and network logs. Admin only. */
+  context?: import('./environment').PageContext | null
   resolutionUrl: string
   hasVideo: boolean
   resolvedAt?: string

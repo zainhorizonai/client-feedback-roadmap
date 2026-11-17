@@ -82,13 +82,57 @@ const maxMb = () => Math.round(config.maxVideoBytes / 1024 / 1024)
 
 // ---------- reports ----------
 
+// What the browser looked like when a report was sent, and (from the optional page snippet) what the page had logged.
+// Everything is clipped and re-shaped here, so whatever a browser sends is only ever stored as plain text.
+const clip = (v: unknown, n: number) => (typeof v === 'string' ? v.slice(0, n) : '')
+const LEVELS = ['log', 'info', 'warn', 'error', 'debug']
+const ENV_KEYS = ['browser', 'os', 'device', 'viewport', 'screen', 'language', 'timezone', 'pixelRatio']
+const CONTEXT_MAX = 56_000
+
+export interface ReportContext {
+  env: Record<string, string>
+  page: string
+  source: 'form' | 'widget'
+  logs: { t: string; level: string; msg: string }[]
+  network: { t: string; method: string; url: string; status: number; ms: number }[]
+}
+
+export function sanitizeContext(raw: unknown): ReportContext | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const envIn = o.env && typeof o.env === 'object' ? (o.env as Record<string, unknown>) : {}
+  const env: Record<string, string> = {}
+  for (const k of ENV_KEYS) { const v = clip(envIn[k], 80); if (v) env[k] = v }
+  const logs = (Array.isArray(o.logs) ? o.logs : []).slice(-100).map((l) => {
+    const x = (l ?? {}) as Record<string, unknown>
+    return { t: clip(x.t, 30), level: LEVELS.includes(String(x.level)) ? String(x.level) : 'log', msg: clip(x.msg, 400) }
+  }).filter((l) => l.msg)
+  const network = (Array.isArray(o.network) ? o.network : []).slice(-60).map((n) => {
+    const x = (n ?? {}) as Record<string, unknown>
+    const status = Number(x.status), ms = Number(x.ms)
+    return { t: clip(x.t, 30), method: clip(x.method, 10).toUpperCase(), url: clip(x.url, 300), status: Number.isFinite(status) ? Math.max(0, Math.min(999, Math.round(status))) : 0, ms: Number.isFinite(ms) ? Math.max(0, Math.min(600_000, Math.round(ms))) : 0 }
+  }).filter((n) => n.url)
+  const ctx: ReportContext = { env, page: clip(o.page, 500), source: o.source === 'widget' ? 'widget' : 'form', logs, network }
+  if (!Object.keys(env).length && !ctx.page && !logs.length && !network.length) return null
+  // Over the limit: drop the oldest log lines first, then the oldest requests.
+  while (JSON.stringify(ctx).length > CONTEXT_MAX && (ctx.logs.length || ctx.network.length)) {
+    if (ctx.logs.length >= ctx.network.length) ctx.logs.shift(); else ctx.network.shift()
+  }
+  return ctx
+}
+
+function parseContext(s: string): ReportContext | null {
+  if (!s) return null
+  try { return JSON.parse(s) as ReportContext } catch { return null }
+}
+
 interface ReportRow {
   id: string; seq: number; created_at: string; client_id: string; client_name: string
   reporter_id: string; reporter_name: string; reporter_email: string
   title: string; description: string; page_url: string; severity: string; status: Status
   notes: string; resolution_url: string; video_path: string | null; video_mime: string | null; resolved_at: string | null
   kind: Kind; roadmap_stage: string | null; roadmap_auto: number; submitted_at: string | null; reporter_role: 'admin' | 'client'
-  assignee_id: string | null; assignee_name: string | null
+  assignee_id: string | null; assignee_name: string | null; context: string
 }
 interface HistoryRow { report_id: string; at: string; by: string; kind: string; text: string; from_value: string | null; to_value: string | null }
 interface LinkedItem { id: string; title: string; state: string }
@@ -111,7 +155,7 @@ function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[], items: L
     status: r.status,
     kind: r.kind,
     // Internal notes and roadmap links never leave the server for clients.
-    ...(user.role === 'admin' ? { notes: r.notes, roadmapItems: items, assignee: r.assignee_id ? { id: r.assignee_id, name: r.assignee_name ?? '' } : null } : {}),
+    ...(user.role === 'admin' ? { notes: r.notes, roadmapItems: items, assignee: r.assignee_id ? { id: r.assignee_id, name: r.assignee_name ?? '' } : null, context: parseContext(r.context) } : {}),
     resolutionUrl: r.resolution_url,
     hasVideo: !!r.video_path,
     resolvedAt: r.resolved_at ?? undefined,
@@ -407,7 +451,7 @@ app.get('/api/reports/:id', async (c) => {
  *  pick the same one, the unique constraint rejects the loser, which simply retries. */
 async function insertReport(f: {
   clientId: string; reporterId: string; title: string; description: string; pageUrl: string
-  severity: string; kind: Kind; submittedAt: string | null
+  severity: string; kind: Kind; submittedAt: string | null; context?: string
 }): Promise<string> {
   const counter = await one<{ code: string | null; report_seq: number; name: string }>('UPDATE clients SET report_seq = report_seq + 1 WHERE id = $1 RETURNING code, report_seq, name', f.clientId)
   if (!counter) throw new HttpError(404, 'Project not found')
@@ -421,11 +465,11 @@ async function insertReport(f: {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       const row = await one<{ id: string }>(
-        `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity, kind, submitted_at)
-         SELECT $10::text, n, $1, $2, $3, $4, $5, $6, $7, $8, $9::text
+        `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity, kind, submitted_at, context)
+         SELECT $10::text, n, $1, $2, $3, $4, $5, $6, $7, $8, $9::text, $11
            FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM reports) s
          RETURNING id`,
-        now(), f.clientId, f.reporterId, f.title, f.description, f.pageUrl, f.severity, f.kind, f.submittedAt, id,
+        now(), f.clientId, f.reporterId, f.title, f.description, f.pageUrl, f.severity, f.kind, f.submittedAt, id, f.context ?? '',
       )
       if (row) return row.id
     } catch (e) {
@@ -468,9 +512,11 @@ app.post('/api/reports', async (c) => {
   const clientId = typeof body.clientId === 'string' && body.clientId ? body.clientId : user.projects.length === 1 ? user.projects[0].id : ''
   if (!user.projects.some((p) => p.id === clientId)) throw new HttpError(400, 'Choose which of your projects this is for')
 
+  const ctx = sanitizeContext(body.context)
   const id = await insertReport({
     clientId, reporterId: user.id, title, description, pageUrl, severity, kind,
     submittedAt: withVideo ? null : now(),
+    context: ctx ? JSON.stringify(ctx) : '',
   })
   if (!withVideo) {
     await addHistory(id, 'client', 'created', 'Report submitted')

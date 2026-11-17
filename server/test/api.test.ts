@@ -1532,3 +1532,66 @@ describe('phase 1: owners, bulk changes, reminders and daily summaries', () => {
     assert.equal(await sendReminders(), 0)
   })
 })
+
+describe('phase 2: environment and page logs on a report', () => {
+  const adminC = new Client()
+  const kim = new Client()
+  before(async () => {
+    // The previous suite captured mail; first-time sign-in here needs the local dev link, which console mode gives.
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    config.emailProvider = 'console'
+    setMailTransportForTests(null)
+    await adminC.signIn('admin@test.com')
+    const pid = (await adminC.json('POST', '/api/admin/clients', { name: 'Hooli' })).data.client.id
+    await adminC.json('POST', `/api/admin/clients/${pid}/users`, { email: 'kim@hooli.test', name: 'Kim Hooli' })
+    await kim.signIn('kim@hooli.test')
+  })
+
+  it('stores the browser details and logs for the team only', async () => {
+    const res = await kim.json('POST', '/api/reports', {
+      title: 'Has context', withVideo: false,
+      context: {
+        source: 'widget', page: 'https://app.hooli.test/checkout',
+        env: { browser: 'Chrome 140', os: 'macOS', viewport: '1440x900', language: 'en-AU', timezone: 'Australia/Sydney', evil: 'ignored' },
+        logs: [{ t: '12:00:01', level: 'error', msg: 'TypeError: x is undefined' }, { t: '12:00:02', level: 'weird', msg: '<script>alert(1)</script>' }],
+        network: [{ t: '12:00:03', method: 'post', url: 'https://api.hooli.test/pay', status: 500, ms: 842 }, { t: 'x', method: 'GET', url: '', status: 200, ms: 1 }],
+      },
+    })
+    assert.equal(res.status, 201)
+    assert.equal('context' in res.data.report, false, 'not sent back to the client')
+    const id = res.data.report.id
+    const seen = (await adminC.json('GET', `/api/reports/${id}`)).data.report.context
+    assert.equal(seen.source, 'widget')
+    assert.equal(seen.page, 'https://app.hooli.test/checkout')
+    assert.equal(seen.env.browser, 'Chrome 140'); assert.equal(seen.env.evil, undefined)
+    assert.equal(seen.logs.length, 2); assert.equal(seen.logs[1].level, 'log', 'unknown levels become log')
+    assert.equal(seen.logs[1].msg, '<script>alert(1)</script>', 'kept as plain text; the page renders it as text')
+    assert.equal(seen.network.length, 1, 'a request without a url is dropped')
+    assert.equal(seen.network[0].method, 'POST')
+    assert.equal((await kim.json('GET', `/api/reports/${id}`)).data.report.context, undefined)
+  })
+
+  it('clips long lines, clamps numbers, and ignores junk', async () => {
+    const made = await kim.json('POST', '/api/reports', {
+      title: 'Clipped', withVideo: false,
+      context: { env: { browser: 'x'.repeat(500) }, logs: Array.from({ length: 150 }, (_, i) => ({ level: 'info', msg: `line ${i} ${'y'.repeat(900)}` })).slice(0, 40), network: [{ method: 'GET', url: 'https://a.test/' + 'z'.repeat(900), status: 99999, ms: -5 }] },
+    })
+    const c = (await adminC.json('GET', `/api/reports/${made.data.report.id}`)).data.report.context
+    assert.equal(c.env.browser.length, 80)
+    assert.equal(c.logs[0].msg.length, 400)
+    assert.equal(c.network[0].status, 999); assert.equal(c.network[0].ms, 0)
+    for (const junk of ['string', 5, [], null, { env: 'no', logs: 'no', network: 7 }]) {
+      const r = await kim.json('POST', '/api/reports', { title: 'Junk', withVideo: false, context: junk })
+      assert.equal(r.status, 201)
+      assert.equal((await adminC.json('GET', `/api/reports/${r.data.report.id}`)).data.report.context, null)
+    }
+  })
+
+  it('keeps the stored size bounded', async () => {
+    const { sanitizeContext } = await import('../app.js')
+    const huge = sanitizeContext({ logs: Array.from({ length: 100 }, (_, i) => ({ level: 'error', msg: `${i}${'q'.repeat(399)}` })), network: Array.from({ length: 60 }, (_, i) => ({ method: 'GET', url: `https://a.test/${i}${'p'.repeat(280)}`, status: 500, ms: 1 })) })!
+    assert.ok(JSON.stringify(huge).length <= 56_000)
+    assert.ok(huge.logs.length + huge.network.length > 0)
+  })
+})

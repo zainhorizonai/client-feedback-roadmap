@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Building2, MailPlus, Plus, Trash2, UserMinus, UserPlus } from 'lucide-react'
+import { Building2, Copy, MailPlus, Plus, Trash2, UserMinus, UserPlus } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useProject } from '../lib/project'
 import { notify } from '../lib/toast'
@@ -8,6 +8,22 @@ import { EditableCell } from '../components/EditableCell'
 import { Button, EmptyState, Field, fmtDate, Mono, PageHeader, Skeleton } from '../components/ui'
 
 type Person = ClientOrg['users'][number]
+
+/** The one line to paste into the site clients test, so their reports can carry console and network logs. */
+function SnippetCard() {
+  const code = `<script src="${window.location.origin}/seam-widget.js" defer></script>`
+  return (
+    <section aria-labelledby="snippet-h" className="mt-8 rounded-card border border-line bg-surface p-4">
+      <h2 id="snippet-h" className="font-semibold">Capture what the page logged</h2>
+      <p className="mt-1 text-muted">Paste this into the site your clients test. It adds a small "Report a problem" button. When a client uses it, their report arrives with the browser details, the console messages and the failed requests from that page. Nothing is sent unless they report something, and they can untick it first. Web addresses are recorded without anything after the question mark.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <code className="min-w-0 flex-1 basis-80 overflow-x-auto whitespace-nowrap rounded-control bg-canvas px-3 py-2 font-mono text-sm">{code}</code>
+        <Button variant="secondary" onClick={() => { navigator.clipboard?.writeText(code).then(() => notify('Copied.'), () => notify('Copy it by hand: select the line and copy.', 'error')) }}><Copy className="h-4 w-4" aria-hidden="true" />Copy</Button>
+      </div>
+      <p className="mt-2 text-sm text-muted">Options: add <code className="font-mono">data-button="off"</code> to use your own button that calls <code className="font-mono">SEAM.open()</code>, or <code className="font-mono">data-capture="console"</code> to leave out network requests.</p>
+    </section>
+  )
+}
 
 export function AdminClients() {
   const { projects, reload, loaded } = useProject()
@@ -188,6 +204,7 @@ export function AdminClients() {
           ))}
         </div>
       )}
+      <SnippetCard />
     </div>
   )
 }

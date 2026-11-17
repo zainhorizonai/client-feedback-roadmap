@@ -11,6 +11,7 @@ import { hasSeverity, type Kind } from '../lib/types'
 import { Recorder } from '../components/Recorder'
 import { Button, Field } from '../components/ui'
 import { notify } from '../lib/toast'
+import { captureEnvironment, type PageContext } from '../lib/environment'
 
 const OPTIONS: { kind: Kind; icon: LucideIcon; hint: string; param: string }[] = [
   { kind: 'Bug', icon: Bug, hint: 'Something is broken', param: 'bug' },
@@ -28,6 +29,7 @@ const COPY: Record<Kind, { title: string; placeholder: string; detail: string; v
 
 export function NewReport() {
   const nav = useNavigate()
+  const [params] = useSearchParams()
   const { maxVideoMb, user } = useAuth()
   const userId = user?.id ?? ''
   const reports = useReports()
@@ -35,9 +37,12 @@ export function NewReport() {
   const saved = useRef(loadDraft(userId)).current
   const [restored, setRestored] = useState(!!saved)
   const [retry, setRetry] = useState(0)
+  // When opened from the page snippet, the page hands over what it logged. They can leave it out.
+  const fromWidget = params.get('from') === 'widget' && !!window.opener
+  const [pageCtx, setPageCtx] = useState<PageContext | null>(null)
+  const [attach, setAttach] = useState(true)
   const { projects, selectedId } = useClientProject()
   const [projectId, setProjectId] = useState(saved && projects.some((p) => p.id === saved.projectId) ? saved.projectId : selectedId)
-  const [params] = useSearchParams()
   const [kind, setKind] = useState<Kind>(OPTIONS.find((o) => o.param === params.get('type'))?.kind ?? (saved?.kind as Kind | undefined) ?? 'Bug')
   const [video, setVideo] = useState<Blob | null>(null)
   const [title, setTitle] = useState(saved?.title ?? '')
@@ -51,6 +56,20 @@ export function NewReport() {
   const [error, setError] = useState('')
   const titleRef = useRef<HTMLInputElement>(null)
   const copy = COPY[kind]
+
+  useEffect(() => {
+    if (!fromWidget) return
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== window.opener) return
+      const d = e.data as { type?: string; payload?: PageContext } | null
+      if (d?.type !== 'seam:context' || !d.payload || typeof d.payload !== 'object') return
+      setPageCtx(d.payload)
+      if (typeof d.payload.page === 'string') setPageUrl((u) => u || d.payload!.page!.slice(0, 500))
+    }
+    window.addEventListener('message', onMessage)
+    window.opener?.postMessage({ type: 'seam:ready' }, '*')
+    return () => window.removeEventListener('message', onMessage)
+  }, [fromWidget])
 
   // Keep what they type, and the video, so a refresh or a closed tab loses nothing.
   useEffect(() => {
@@ -85,7 +104,12 @@ export function NewReport() {
     setRetry(0)
     setError('')
     try {
-      const r = await createReport({ clientId: projectId, title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) && blocking ? 'High' : 'Medium', kind }, video, setProgress, setRetry)
+      const r = await createReport({ clientId: projectId, title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) && blocking ? 'High' : 'Medium', kind, context: {
+        source: pageCtx ? 'widget' : 'form',
+        page: pageCtx?.page,
+        env: pageCtx?.env ?? captureEnvironment(),
+        ...(pageCtx && attach ? { logs: pageCtx.logs, network: pageCtx.network } : {}),
+      } }, video, setProgress, setRetry)
       clearDraft(userId); clearDraftVideo(userId)
       // Straight to the item, over the list, so they can see it and add to it.
       notify(onRoadmap ? `Added to your roadmap as ${r.id}.` : `Sent as ${r.id}. We will update you here and by email.`)
@@ -159,6 +183,12 @@ export function NewReport() {
                 {similar.map((r) => <li key={r.id}><Link to={`/reports/${r.id}`} className="font-semibold"><span className="font-mono text-sm">{r.id}</span> {r.title}</Link></li>)}
               </ul>
             </div>
+          )}
+          {pageCtx && (
+            <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line bg-surface p-3">
+              <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--seam-terracotta)]" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
+              <span><span className="font-semibold">Include what the page logged</span><span className="block text-sm text-muted">{pageCtx.logs?.length ?? 0} console {(pageCtx.logs?.length ?? 0) === 1 ? 'message' : 'messages'} and {pageCtx.network?.length ?? 0} failed {(pageCtx.network?.length ?? 0) === 1 ? 'request' : 'requests'} from the page you were on. Only our team sees them.</span></span>
+            </label>
           )}
           <Field label={copy.detail}>
             <textarea className="input" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} />

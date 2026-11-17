@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { CheckCircle2, ExternalLink, MessageCircleQuestion, Pencil, RotateCcw, XCircle } from 'lucide-react'
+import { Clock, CheckCircle2, ExternalLink, MessageCircleQuestion, Pencil, RotateCcw, XCircle } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { addClientComment, approveReport, clientConfirm, reopenReport, updateDetails, useReports, useReportsLoaded } from '../lib/store'
 import { moveItem, useRoadmap } from '../lib/roadmap'
 import { hasSeverity, ROADMAP_STATES, type RoadmapState } from '../lib/types'
 import { Conversation, History } from '../components/Activity'
+import { videoStamp } from '../lib/environment'
 import { Block, Button, Field, fmtDateTime, KindTag, Modal, ModalSplit, Mono, SeverityBadge, StageBadge, ClientStatusBadge, VideoEvidence } from '../components/ui'
 
 /** A client's view of one item: a large dialog over their list, like a task view. */
@@ -111,7 +112,10 @@ export function ReportDetail({ id, onClose }: { id: string; onClose: () => void 
         <Conversation history={report.history} viewer="client" />
         <form className="mt-3" onSubmit={(e) => { e.preventDefault(); if (message.trim()) send() }}>
           <Field label="Add a note" hint="The team sees every note."><textarea className="input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
-          <div className="mt-2 flex justify-end"><Button type="submit" pending={sending} disabled={!message.trim()}>Add note</Button></div>
+          <div className="mt-2 flex flex-wrap justify-end gap-2">
+            {report.hasVideo && <Button variant="tertiary" onClick={() => { const t = videoStamp(); if (t) setMessage((m) => `${m}${m && !m.endsWith(' ') && !m.endsWith('\n') ? ' ' : ''}${t} `) }}><Clock className="h-4 w-4" aria-hidden="true" />Add video time</Button>}
+            <Button type="submit" pending={sending} disabled={!message.trim()}>Add note</Button>
+          </div>
         </form>
       </Block>
 

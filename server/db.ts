@@ -132,6 +132,8 @@ const SCHEMA = [
   // Report numbers are per project (ACME-12), so one client never sees how busy the others are.
   // Phase 1: who owns an item, how each person wants to be emailed, and a queue for the once-a-day summary.
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS assignee_id TEXT',
+  // Phase 2: what the browser looked like, plus console and network logs from the page, as sanitized JSON text.
+  "ALTER TABLE reports ADD COLUMN IF NOT EXISTS context TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_mode TEXT NOT NULL DEFAULT 'instant'",
   `CREATE TABLE IF NOT EXISTS notification_queue (
     id SERIAL PRIMARY KEY,

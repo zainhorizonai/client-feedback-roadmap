@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link2, Lock, Send } from 'lucide-react'
+import { Clock, Link2, Lock, Send } from 'lucide-react'
+import { videoStamp, type PageContext } from '../lib/environment'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { addReply, assign, setStatus, updateFields, useReports } from '../lib/store'
@@ -21,6 +22,41 @@ export function ReportModal({ report, onClose }: { report: Report; onClose: () =
     >
       <ReportBody report={report} />
     </Modal>
+  )
+}
+
+/** Where and how it happened: the browser, and (with the page snippet) what the page logged. Rendered only as text. */
+function ContextBlocks({ ctx }: { ctx: PageContext }) {
+  const env = Object.entries(ctx.env ?? {}).filter(([, v]) => v)
+  const logs = ctx.logs ?? []
+  const net = ctx.network ?? []
+  const errors = logs.filter((l) => l.level === 'error').length
+  const NAMES: Record<string, string> = { browser: 'Browser', os: 'System', device: 'Device', viewport: 'Window', screen: 'Screen', language: 'Language', timezone: 'Time zone', pixelRatio: 'Pixel ratio' }
+  return (
+    <Block title="Where it happened" hint={ctx.source === 'widget' ? 'Captured from the page the client was on.' : 'Captured from the browser the client sent this from.'}>
+      {ctx.page && <p className="mb-2 break-all text-sm"><a href={/^https?:\/\//.test(ctx.page) ? ctx.page : undefined} target="_blank" rel="noreferrer">{ctx.page}</a></p>}
+      {env.length > 0 && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          {env.map(([k, v]) => (<div key={k} className="contents"><dt className="text-muted">{NAMES[k] ?? k}</dt><dd className="font-mono">{v}</dd></div>))}
+        </dl>
+      )}
+      {logs.length > 0 && (
+        <details className="mt-3 rounded-control border border-line bg-surface" open={errors > 0}>
+          <summary className="cursor-pointer px-3 py-2 font-semibold">Console · {logs.length} {logs.length === 1 ? 'message' : 'messages'}{errors > 0 && <span className="ml-2 badge badge-error">{errors} {errors === 1 ? 'error' : 'errors'}</span>}</summary>
+          <ol className="max-h-60 overflow-auto border-t border-line px-3 py-2 font-mono text-xs">
+            {logs.map((l, i) => (<li key={i} className={`break-words py-0.5 ${l.level === 'error' ? 'text-[var(--seam-error-fg)]' : l.level === 'warn' ? 'text-[var(--seam-warning-fg)]' : ''}`}><span className="text-muted">{l.t} {l.level}</span> {l.msg}</li>))}
+          </ol>
+        </details>
+      )}
+      {net.length > 0 && (
+        <details className="mt-3 rounded-control border border-line bg-surface" open>
+          <summary className="cursor-pointer px-3 py-2 font-semibold">Failed requests · {net.length}</summary>
+          <ol className="max-h-60 overflow-auto border-t border-line px-3 py-2 font-mono text-xs">
+            {net.map((n, i) => (<li key={i} className="break-all py-0.5"><span className="text-muted">{n.t}</span> {n.method} {n.url} <strong className="text-[var(--seam-error-fg)]">{n.status === 0 ? 'no response' : n.status}</strong> <span className="text-muted">{n.ms} ms</span></li>))}
+          </ol>
+        </details>
+      )}
+    </Block>
   )
 }
 
@@ -75,6 +111,8 @@ function ReportBody({ report }: { report: Report }) {
         </Block>
       )}
 
+      {report.context && <ContextBlocks ctx={report.context} />}
+
       <Block title="Shared replies" hint="The client sees these and is emailed.">
         <Conversation history={report.history} viewer="admin" />
         <div className="mt-3">
@@ -88,6 +126,7 @@ function ReportBody({ report }: { report: Report }) {
                 {STATUSES.map((st) => <option key={st} value={st}>{st === report.status ? `${st} (no change)` : st}</option>)}
               </select>
             </label>
+            {report.hasVideo && <Button variant="tertiary" onClick={() => { const t = videoStamp(); if (t) setReply((r) => `${r}${r && !r.endsWith(' ') && !r.endsWith('\n') ? ' ' : ''}${t} `) }}><Clock className="h-4 w-4" aria-hidden="true" />Add video time</Button>}
             <Button onClick={send} pending={sending} disabled={!reply.trim()}><Send className="h-4 w-4" aria-hidden="true" /> Send reply</Button>
           </div>
         </div>
@@ -111,7 +150,7 @@ function ReportBody({ report }: { report: Report }) {
             {team.map((t) => <option key={t.id} value={t.id}>{t.name}{t.id === user?.id ? ' (you)' : ''}</option>)}
           </select>
         </Field>
-        {user && report.assignee?.id !== user.id && <Button variant="tertiary" className="!min-h-9 !px-0" onClick={() => assign(report.id, user.id, user.name)}>Assign to me</Button>}
+        {user && report.assignee?.id !== user.id && <Button variant="secondary" className="!min-h-9" onClick={() => assign(report.id, user.id, user.name)}>Assign to me</Button>}
         <Field label="Type">
           <select className="input" value={report.kind} onChange={(e) => updateFields(report.id, { kind: e.target.value as Kind })}>
             {KINDS.map((k) => <option key={k}>{k}</option>)}

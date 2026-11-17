@@ -142,10 +142,24 @@ export function SeamDivider({ className = '' }: { className?: string }) {
 // ---------- Video: native controls, never autoplay ----------
 
 export function VideoEvidence({ src, title = 'Video', summary }: { src?: string | null; title?: string; summary?: string }) {
+  const video = useRef<HTMLVideoElement>(null)
+  // A timestamp in a note ("[1:23]") asks the video to jump there.
+  useEffect(() => {
+    const seek = (e: Event) => {
+      const v = video.current
+      const t = (e as CustomEvent<number>).detail
+      if (!v || !Number.isFinite(t)) return
+      v.currentTime = t
+      v.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      void v.play().catch(() => { /* the browser may need a tap first */ })
+    }
+    window.addEventListener('seam:seek', seek)
+    return () => window.removeEventListener('seam:seek', seek)
+  }, [])
   return (
     <figure className="m-0">
       {src ? (
-        <video key={src} src={src} controls preload="metadata" playsInline aria-label={title} className="aspect-video w-full rounded-card bg-forest" />
+        <video ref={video} key={src} src={src} controls preload="metadata" playsInline aria-label={title} className="aspect-video w-full rounded-card bg-forest" />
       ) : (
         <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-card bg-forest text-cream/80">
           <VideoOff className="h-7 w-7" aria-hidden="true" />

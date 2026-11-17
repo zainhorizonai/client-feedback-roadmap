@@ -1,6 +1,16 @@
 import { ArrowRight, CheckCircle2, Circle, RotateCcw } from 'lucide-react'
 import type { HistoryEntry } from '../lib/types'
 import { fmtDateTime, Mono } from './ui'
+import { seekVideo } from '../lib/environment'
+
+/** Turns [1:23] in a note into a button that jumps the video to that moment. */
+function WithStamps({ text }: { text: string }) {
+  const parts = text.split(/(\[\d{1,3}:\d{2}\])/g)
+  return <>{parts.map((p, i) => {
+    const m = /^\[(\d{1,3}):(\d{2})\]$/.exec(p)
+    return m ? <button key={i} type="button" onClick={() => seekVideo(Number(m[1]) * 60 + Number(m[2]))} className="rounded px-1 font-mono text-sm font-semibold underline ring-1 ring-current/40 hover:ring-current" aria-label={`Jump to ${m[1]}:${m[2]} in the video`}>{m[1]}:{m[2]}</button> : <span key={i}>{p}</span>
+  })}</>
+}
 
 /** The shared conversation between the client and the team. Internal notes never appear here. */
 export function Conversation({ history, viewer }: { history: HistoryEntry[]; viewer: 'client' | 'admin' }) {
@@ -14,7 +24,7 @@ export function Conversation({ history, viewer }: { history: HistoryEntry[]; vie
         return (
           <li key={i} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
             <div className={`max-w-[92%] rounded-card px-3 py-2 ${m.by === 'admin' ? 'bg-forest text-cream' : 'border border-line bg-surface'}`}>
-              <p className="whitespace-pre-wrap break-words">{m.text}</p>
+              <p className="whitespace-pre-wrap break-words"><WithStamps text={m.text} /></p>
             </div>
             <p className="mt-1 text-xs text-muted">{who} · <Mono>{fmtDateTime(m.at)}</Mono></p>
           </li>

@@ -108,3 +108,12 @@ The handoff notes that it does not establish that the name SEAM is available. Ch
 - **Email preference:** each person chooses "as they happen" or "one summary a day" on their Account page. Sign-in and password emails always go straight away.
 - **Clients:** an unfinished report (text and video) survives a refresh or closed tab; similar open items are suggested before sending; a dropped connection during upload is retried three times before it asks the person to try again.
 - **Not built:** truly resumable uploads. A failed upload still restarts from the beginning, though the recording is kept so nobody has to record again.
+
+## Phase 2: help the developer
+
+- **Environment on every report:** browser, system, device, window size, language and time zone are sent with each report and shown to the team under "Where it happened". Clients never see this section.
+- **Page snippet (`public/seam-widget.js`):** one line on the site clients test adds a "Report a problem" button. It keeps a rolling record of console messages, script errors and failed requests in memory, and hands it to SEAM only when the person reports something (they can untick it). Web addresses are recorded without the query string or fragment. Copy the line from **Projects and people**.
+  - Limits: it only sees pages that have the line installed, and only what happens after the page loads. It cannot read another site's console, and a browser that blocks pop-ups falls back to a plain report.
+  - How it is kept safe: the snippet only talks to SEAM's own address, SEAM only accepts the hand-over from the window that opened it, and the server re-shapes and clips everything. It is always shown as plain text.
+- **Notes pinned to the video:** "Add video time" puts the current moment (for example `[1:23]`) in a note, and that moment becomes a button that jumps the video there, for both clients and the team.
+- **Not built:** transcripts, an AI summary and suggested titles. They need a speech-to-text service and an AI key, which are not set up. Integrations (Linear, Jira, GitHub, Slack, Teams) were left out on purpose.

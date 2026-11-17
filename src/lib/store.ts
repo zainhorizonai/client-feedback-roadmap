@@ -72,6 +72,8 @@ export interface NewReportInput {
   pageUrl: string
   severity: Severity
   kind: Kind
+  /** Browser details, and logs from the page when the snippet is installed. */
+  context?: import('./environment').PageContext
 }
 
 /** The video is optional. Without one the report is complete as soon as it is created. */
