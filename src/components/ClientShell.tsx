@@ -19,12 +19,12 @@ function Header() {
   const pending = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, countEntries(buildEntries(reports, items, p.id))])), [projects, reports, items])
   const here = pending[selectedId]
   const link = ({ isActive }: { isActive: boolean }) =>
-    `inline-flex min-h-11 items-center gap-2 rounded-full px-4 font-semibold no-underline md:min-h-9 ${isActive ? 'bg-white text-black' : 'text-cream hover:bg-white/15'}`
+    `inline-flex min-h-11 items-center gap-2 rounded-control px-3 font-semibold no-underline md:min-h-9 ${isActive ? 'bg-action text-on-action' : 'text-ink hover:bg-subtle/60'}`
 
   return (
-    <header className="on-dark rounded-b-[1.75rem] bg-black md:rounded-[1.75rem]">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 md:px-6">
-        <Link to="/reports" aria-label="SEAM home" className="shrink-0"><img src="/brand/seam-logo-reverse.svg" alt="" className="h-9 w-auto" /></Link>
+    <header className="border-b border-line bg-surface">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 md:px-8">
+        <Link to="/reports" aria-label="SEAM home" className="shrink-0"><img src="/brand/seam-logo.svg" alt="" className="h-9 w-auto" /></Link>
         {projects.length > 1 ? (
           <div className="flex items-center gap-2">
             <Building2 className="hidden h-4 w-4 text-muted sm:block" aria-hidden="true" />
@@ -34,12 +34,12 @@ function Header() {
             </select>
           </div>
         ) : (
-          <p className="rounded-full border border-white/25 px-3 py-1 text-sm font-semibold" aria-label="Project">{user?.clientName}</p>
+          <p className="rounded-control bg-canvas px-2.5 py-1 text-sm font-semibold" aria-label="Project">{user?.clientName}</p>
         )}
         <nav className="order-last flex w-full gap-1 md:order-none md:w-auto" aria-label="Main">
           <NavLink to="/reports" className={link}>
             My items
-            {here && here.pending > 0 && <span className="rounded-full bg-white/20 px-1.5 text-sm font-semibold text-inherit" aria-label={`${here.pending} pending`}>{here.pending}</span>}
+            {here && here.pending > 0 && <span className="rounded-full bg-surface px-1.5 text-sm font-semibold text-ink ring-1 ring-line" aria-label={`${here.pending} pending`}>{here.pending}</span>}
           </NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-2">
@@ -56,11 +56,9 @@ export function ClientShell() {
   useRoadmapSync()
   return (
     <ClientProjectProvider>
-      <div className="min-h-screen p-0 md:p-4">
-        <div className="pane min-h-screen overflow-hidden md:min-h-[calc(100vh-2rem)] md:rounded-[2rem] md:border-2 md:border-black">
-          <Header />
-          <main className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8"><Outlet /></main>
-        </div>
+      <div className="min-h-screen">
+        <Header />
+        <main className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8"><Outlet /></main>
         <Toasts />
       </div>
     </ClientProjectProvider>

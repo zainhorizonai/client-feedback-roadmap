@@ -131,7 +131,7 @@ function ItemEditor({ item, defaultClientId, onClose, onOpenReport }: { item: Ro
           <ul className="mt-2 max-h-52 space-y-1 overflow-y-auto">
             {candidates.length === 0 && <li className="py-3 text-center text-sm text-muted">No reports to show.</li>}
             {candidates.map((r) => (
-              <li key={r.id} className="flex items-center gap-2 rounded-control px-1 py-1 hover:bg-subtle">
+              <li key={r.id} className="flex items-center gap-2 rounded-control px-1 py-1 hover:bg-canvas">
                 <label className="flex min-h-9 min-w-0 flex-1 cursor-pointer items-center gap-2">
                   <input type="checkbox" checked={d.reportIds.includes(r.id)} onChange={() => toggle(r.id)} className="h-4 w-4 accent-[var(--seam-terracotta)]" />
                   <Mono className="shrink-0 text-sm">{r.id}</Mono><span className="truncate">{r.title}</span>

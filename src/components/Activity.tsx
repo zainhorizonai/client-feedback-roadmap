@@ -13,7 +13,7 @@ export function Conversation({ history, viewer }: { history: HistoryEntry[]; vie
         const who = m.by === 'admin' ? (viewer === 'admin' ? 'You' : 'SEAM team') : viewer === 'client' ? 'You' : 'Client'
         return (
           <li key={i} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-            <div className={`max-w-[92%] rounded-card px-3 py-2 ${m.by === 'admin' ? 'bg-white/15 text-cream' : 'border border-line bg-surface'}`}>
+            <div className={`max-w-[92%] rounded-card px-3 py-2 ${m.by === 'admin' ? 'bg-forest text-cream' : 'border border-line bg-surface'}`}>
               <p className="whitespace-pre-wrap break-words">{m.text}</p>
             </div>
             <p className="mt-1 text-xs text-muted">{who} · <Mono>{fmtDateTime(m.at)}</Mono></p>

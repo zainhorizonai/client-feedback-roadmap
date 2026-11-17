@@ -36,7 +36,7 @@ export function ProjectFilter({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        className={`flex min-h-11 w-full items-center gap-2 rounded-full border px-4 text-left font-semibold md:min-h-9 ${dark ? 'border-white/30 bg-black text-cream' : 'border-control bg-surface text-ink'}`}
+        className={`flex min-h-11 w-full items-center gap-2 rounded-control border px-3 text-left font-semibold md:min-h-9 ${dark ? 'border-cream/40 bg-forest text-cream' : 'border-control bg-surface text-ink'}`}
       >
         <Building2 className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate"><span className="sr-only">Projects: </span>{label}</span>
@@ -44,7 +44,7 @@ export function ProjectFilter({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
       </button>
 
       {open && (
-        <div id={panelId} ref={panel} role="dialog" aria-label="Choose projects to show" className="absolute left-0 z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-line bg-[var(--seam-surface-solid)] p-3 text-ink shadow-xl">
+        <div id={panelId} ref={panel} role="dialog" aria-label="Choose projects to show" className="absolute left-0 z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-line bg-surface p-3 text-ink shadow-xl">
           <div className="mb-2 flex items-center justify-between">
             <p className="font-semibold">Show these projects</p>
             <button type="button" onClick={showAll} disabled={isAll} className="text-sm font-semibold underline disabled:cursor-default disabled:no-underline disabled:opacity-50">Show all</button>
@@ -55,9 +55,9 @@ export function ProjectFilter({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
               {shown.map((p) => {
                 const on = isAll || selectedIds.includes(p.id)
                 return (
-                  <li key={p.id} className="flex items-center gap-1 rounded-control hover:bg-subtle">
+                  <li key={p.id} className="flex items-center gap-1 rounded-control hover:bg-canvas">
                     <label className="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2">
-                      <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="h-4 w-4 shrink-0 accent-white" />
+                      <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="h-4 w-4 shrink-0 accent-[var(--seam-terracotta)]" />
                       <span className="min-w-0 flex-1 truncate">{p.name}</span>
                       {p.openCount ? <span className="shrink-0 text-sm text-muted">{p.openCount} open</span> : null}
                     </label>
@@ -83,7 +83,7 @@ export function ProjectChips() {
     <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Projects shown">
       <span className="text-sm text-muted">Showing</span>
       {projects.filter((p) => selectedIds.includes(p.id)).map((p) => (
-        <span key={p.id} className="inline-flex items-center gap-1 rounded-full border border-white/25 bg-black py-1 pl-3 pr-1 text-sm font-semibold text-cream">
+        <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-forest py-1 pl-3 pr-1 text-sm font-semibold text-cream">
           {p.name}
           <button type="button" onClick={() => toggle(p.id)} aria-label={`Stop showing ${p.name}`} className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-cream/20">×</button>
         </span>

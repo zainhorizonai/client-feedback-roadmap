@@ -7,7 +7,7 @@ import { ApiError } from '../lib/api'
 import { createReport } from '../lib/store'
 import { hasSeverity, SEVERITIES, type Kind, type Severity } from '../lib/types'
 import { Recorder } from '../components/Recorder'
-import { Button, ButtonLink, Field, Mono } from '../components/ui'
+import { Button, ButtonLink, Field, Mono, SeamDivider } from '../components/ui'
 
 const OPTIONS: { kind: Kind; icon: LucideIcon; hint: string; param: string }[] = [
   { kind: 'Bug', icon: Bug, hint: 'Something is broken', param: 'bug' },
@@ -71,7 +71,7 @@ export function NewReport() {
     return (
       <div className="mx-auto max-w-md pt-6">
         <div className="overflow-hidden rounded-card border border-line bg-surface text-center">
-          
+          <SeamDivider />
           <div className="p-6" role="status">
             <CheckCircle2 className="mx-auto h-10 w-10 text-[var(--seam-success-fg)]" aria-hidden="true" />
             <h1 className="mt-3 font-semibold">{onRoadmap ? 'Added to your roadmap' : 'Report received'}</h1>

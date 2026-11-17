@@ -27,7 +27,7 @@ export function Toasts() {
         <div
           key={t.id}
           role={t.kind === 'error' ? 'alert' : undefined}
-          className={`pointer-events-auto flex w-full max-w-sm items-start gap-2 rounded-card px-4 py-3 text-sm shadow-lg md:w-auto ${t.kind === 'error' ? 'bg-[#7f1d1d] text-white' : 'bg-white text-[#0c0e0f]'}`}
+          className={`pointer-events-auto flex w-full max-w-sm items-start gap-2 rounded-card px-4 py-3 text-sm shadow-lg md:w-auto ${t.kind === 'error' ? 'bg-[var(--seam-error-fg)] text-white' : 'bg-forest text-cream'}`}
         >
           {t.kind === 'error' ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />}
           <span>{t.text}</span>
