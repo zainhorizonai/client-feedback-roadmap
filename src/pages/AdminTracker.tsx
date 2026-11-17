@@ -154,7 +154,7 @@ export function AdminTracker() {
 
       <ProjectChips />
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" role="group" aria-label="Quick filters">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5" role="group" aria-label="Quick filters">
         <StatTile label="Mine" hint="Open and assigned to you" value={loaded ? reports.filter((r) => matches(r.clientId) && r.status !== 'Resolved' && r.assignee?.id === user?.id).length : '–'} active={filters.assignee === 'me'} onClick={() => f({ assignee: filters.assignee === 'me' ? '' : 'me' })} />
         {([['New', 'New', 'Waiting for triage'], ['In progress', 'In progress', 'Being worked on'], ['Needs client input', 'Waiting on client', 'We asked them something'], ['Ready to verify', 'Ready to verify', 'Fixed, awaiting the client']] as const).map(([status, name, hint]) => (
           <StatTile key={status} attention={status === 'New' || status === 'Needs client input'} label={name} hint={hint} value={loaded ? reports.filter((r) => matches(r.clientId) && r.status === status).length : '–'} active={filters.status === status} onClick={() => f({ status: filters.status === status ? '' : status })} />
@@ -262,7 +262,7 @@ export function AdminTracker() {
               {rows.map((r) => (
                 <tr
                   key={r.id}
-                  className="h-12 cursor-pointer hover:bg-canvas/60"
+                  className="h-12 cursor-pointer transition-colors hover:bg-canvas/60"
                   // Clicking anywhere on the row opens the ticket, except on a control inside it (status, severity, links).
                   onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button, a, input, textarea, label')) openReport(r.id) }}
                 >

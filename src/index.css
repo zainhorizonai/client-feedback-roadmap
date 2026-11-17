@@ -25,6 +25,10 @@
 
   --radius-control: var(--seam-radius-control);
   --radius-card: var(--seam-radius-card);
+  --radius-modal: var(--seam-radius-modal);
+  --shadow-seam-1: var(--seam-shadow-1);
+  --shadow-seam-2: var(--seam-shadow-2);
+  --shadow-seam-3: var(--seam-shadow-3);
   --spacing-sidebar: var(--seam-sidebar-width);
   --spacing-drawer: var(--seam-drawer-width);
 }
@@ -64,13 +68,32 @@ h2 { font: var(--seam-type-section); }
     border: 1px solid var(--seam-border-control); border-radius: var(--seam-radius-control);
     min-height: var(--seam-touch-target); padding: .5rem .75rem; font: inherit;
   }
-  @media (min-width: 768px) { .input { min-height: var(--seam-control-height); } }
+  .input { min-height: var(--seam-control-height); }
   .input::placeholder { color: #6f7a6d; }
   .input[aria-invalid="true"] { border-color: var(--seam-error-fg); }
   textarea.input { min-height: 5rem; }
   /* A value that reads as plain text until you point at it or focus it: used for ticket properties. */
   .input-ghost { width: 100%; min-height: 2.25rem; background: transparent; color: var(--seam-text); border: 1px solid transparent; border-radius: var(--seam-radius-control); padding: .25rem .5rem; margin-left: -.5rem; font: inherit; font-weight: 600; cursor: pointer; }
   .input-ghost:hover, .input-ghost:focus-visible { border-color: var(--seam-border-control); background: var(--seam-surface); }
+}
+
+/* Cards rest on a faint shadow, so they sit on the page instead of looking drawn on it. */
+.rounded-card.bg-surface { box-shadow: var(--seam-shadow-1); }
+
+/* Motion: short and quiet. Things fade and rise into place; nothing bounces. Reduced motion turns it all off below. */
+@keyframes seam-fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes seam-pop { from { opacity: 0; transform: translateY(8px) scale(.98) } to { opacity: 1; transform: none } }
+@keyframes seam-pop-sm { from { opacity: 0; transform: translateY(-4px) scale(.98) } to { opacity: 1; transform: none } }
+@keyframes seam-rise { from { opacity: .6; transform: translateY(24px) } to { opacity: 1; transform: none } }
+.anim-fade { animation: seam-fade .16s ease-out both; }
+.anim-modal { animation: seam-pop .22s cubic-bezier(.2, .8, .2, 1) both; }
+@media (max-width: 767px) { .anim-modal { animation-name: seam-rise; } }
+.anim-pop-sm { animation: seam-pop-sm .14s ease-out both; transform-origin: top; }
+
+/* On a touch screen every control is at least 44px, whatever the window size (a tablet is wider than a phone). */
+@media (pointer: coarse) {
+  button, select, summary, [role="option"], [role="menuitem"], input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]) { min-height: 2.75rem; }
+  button[aria-label] { min-width: 2.75rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

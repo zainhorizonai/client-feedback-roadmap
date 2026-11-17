@@ -9,7 +9,7 @@ import { similarTo } from '../lib/similar'
 import { clearDraft, clearDraftVideo, loadDraft, loadDraftVideo, saveDraft, saveDraftVideo } from '../lib/draft'
 import { hasSeverity, type Kind } from '../lib/types'
 import { Recorder } from '../components/Recorder'
-import { Button, Field } from '../components/ui'
+import { Button, Field, SeamProgress } from '../components/ui'
 import { notify } from '../lib/toast'
 import { captureEnvironment, type PageContext } from '../lib/environment'
 
@@ -206,11 +206,7 @@ export function NewReport() {
 
         {!videoFirst && videoSection}
 
-        {busy && video && (
-          <div role="progressbar" aria-label="Uploading video" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100} className="h-2 overflow-hidden rounded-full bg-subtle">
-            <div className="h-full bg-action transition-all" style={{ width: `${Math.round(progress * 100)}%` }} />
-          </div>
-        )}
+        {busy && video && <SeamProgress fraction={progress} label="Uploading video" />}
         {busy && retry > 0 && <p role="status" className="text-sm text-muted">Your connection dropped. Trying again ({retry} of 3)…</p>}
         {error && (
           <div role="alert" className="rounded-card bg-[var(--seam-error-bg)] p-3 text-[var(--seam-error-fg)]">

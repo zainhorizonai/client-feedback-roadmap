@@ -10,7 +10,7 @@ import { CLIENT_STATUS, SEVERITIES, STATUSES, type Kind, type RoadmapState, type
 type Variant = 'primary' | 'secondary' | 'tertiary' | 'danger'
 const BUTTON_BASE =
   'inline-flex items-center justify-center gap-2 rounded-control px-4 font-semibold no-underline select-none ' +
-  'min-h-11 md:min-h-9 disabled:cursor-not-allowed disabled:opacity-55'
+  'min-h-9 transition-[background-color,box-shadow,transform] duration-150 enabled:active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-55'
 const BUTTON_VARIANT: Record<Variant, string> = {
   primary: 'bg-action text-on-action hover:bg-action-hover',
   secondary: 'border border-control bg-surface text-ink hover:bg-canvas',
@@ -140,7 +140,7 @@ export function PillSelect<T extends string>({ value, options, onChange, label, 
           // status would also open the ticket.
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', left: Math.min(at.x, window.innerWidth - 232), top: at.up ? undefined : at.y, bottom: at.up ? window.innerHeight - at.y : undefined }}
-          className="z-50 w-56 rounded-card border border-line bg-surface p-1.5 shadow-xl"
+          className="anim-pop-sm z-50 w-56 rounded-card border border-line bg-surface p-1.5 shadow-seam-2"
         >
           {options.map((o) => (
             <li key={o} role="option" aria-selected={o === value} tabIndex={-1} onClick={() => pick(o)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(o) } }}
@@ -226,6 +226,7 @@ export function PageHeader({ eyebrow, title, subtitle, actions }: { eyebrow?: Re
 export function EmptyState({ icon, title, children, action }: { icon?: ReactNode; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="rounded-card border border-dashed border-control bg-surface px-6 py-12 text-center">
+      <SeamDivider className="mx-auto mb-5 !h-2 !w-16 opacity-70" />
       {icon && <div className="mx-auto mb-3 flex justify-center text-muted" aria-hidden="true">{icon}</div>}
       <h2 className="font-semibold">{title}</h2>
       {children && <p className="mx-auto mt-1 max-w-md text-muted">{children}</p>}
@@ -240,6 +241,22 @@ export function Skeleton({ rows = 5, className = '' }: { rows?: number; classNam
     <div className={`space-y-2 ${className}`} role="status" aria-live="polite" aria-label="Loading">
       {Array.from({ length: rows }, (_, i) => <div key={i} className="h-12 animate-pulse rounded-control bg-subtle/70" />)}
       <span className="sr-only">Loading</span>
+    </div>
+  )
+}
+
+/** An upload or save shown as the logo's stepped line being drawn, left to right. */
+export function SeamProgress({ fraction, label }: { fraction: number; label: string }) {
+  const f = Math.max(0, Math.min(1, fraction))
+  const clip = useId()
+  const line = 'M0 10H24V6H48V2H72V6H96V10H120'
+  return (
+    <div role="progressbar" aria-label={label} aria-valuenow={Math.round(f * 100)} aria-valuemin={0} aria-valuemax={100}>
+      <svg viewBox="0 0 120 12" aria-hidden="true" className="h-3 w-full" preserveAspectRatio="none">
+        <defs><clipPath id={clip}><rect x="0" y="0" height="12" width={f * 120} style={{ transition: 'width .25s ease-out' }} /></clipPath></defs>
+        <path d={line} fill="none" stroke="var(--seam-border)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+        <path d={line} fill="none" stroke="var(--seam-terracotta)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" clipPath={`url(#${clip})`} />
+      </svg>
     </div>
   )
 }
@@ -343,14 +360,14 @@ export function Modal({ title, onClose, children, eyebrow, actions, size = 'md' 
   const big = size === 'xl'
   return (
     <div className="fixed inset-0 z-40 flex items-stretch justify-center md:items-center md:p-6">
-      <div className="absolute inset-0 bg-forest/50" onClick={onClose} aria-hidden="true" />
+      <div className="anim-fade absolute inset-0 bg-forest/50" onClick={onClose} aria-hidden="true" />
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative flex w-full flex-col overflow-hidden bg-surface shadow-2xl outline-none md:rounded-[1rem] ${big ? 'h-[100dvh] md:h-[min(90vh,60rem)] md:max-w-6xl' : 'h-[100dvh] md:h-auto md:max-h-[90vh] md:max-w-xl'}`}
+        className={`anim-modal relative flex w-full flex-col overflow-hidden bg-surface shadow-seam-3 outline-none md:rounded-modal ${big ? 'h-[100dvh] md:h-[min(90vh,60rem)] md:max-w-6xl' : 'h-[100dvh] md:h-auto md:max-h-[90vh] md:max-w-xl'}`}
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3 md:px-6 md:py-4">
           <div className="min-w-0">
@@ -359,7 +376,7 @@ export function Modal({ title, onClose, children, eyebrow, actions, size = 'md' 
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {actions}
-            <button type="button" onClick={onClose} aria-label="Close" className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink md:h-9 md:w-9">
+            <button type="button" onClick={onClose} aria-label="Close" className="-mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-canvas hover:text-ink">
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
           </div>
@@ -401,7 +418,7 @@ export function Block({ title, children, tone = 'plain', hint }: { title: string
 export function StatTile({ label, hint, value, active, onClick, attention = false }: { label: string; hint?: string; value: ReactNode; active?: boolean; onClick?: () => void; attention?: boolean }) {
   const zero = value === 0 || value === '0'
   const hot = attention && !zero && typeof value !== 'string'
-  const cls = `relative rounded-card border p-4 text-left ${active ? 'border-forest ring-2 ring-forest' : 'border-line'} ${hot && !active ? 'bg-[var(--seam-warning-bg)]' : 'bg-surface'} ${onClick ? 'hover:border-control' : ''}`
+  const cls = `relative rounded-card border p-4 text-left transition-colors ${active ? 'border-forest ring-2 ring-forest' : 'border-line'} ${hot && !active ? 'bg-[var(--seam-warning-bg)]' : 'bg-surface'} ${onClick ? 'hover:border-control' : ''}`
   const inner = (
     <>
       {onClick && <ListFilter className={`absolute right-3 top-3 h-4 w-4 ${active ? 'text-forest' : 'text-muted/60'}`} aria-hidden="true" />}
@@ -418,7 +435,7 @@ export function Segmented<T extends string>({ label, value, options, onChange }:
   return (
     <div role="group" aria-label={label} className="inline-flex rounded-control border border-control bg-surface p-0.5">
       {options.map((o) => (
-        <button key={o.id} type="button" onClick={() => onChange(o.id)} aria-pressed={value === o.id} className={`min-h-10 rounded-[.25rem] px-3 font-semibold md:min-h-8 ${value === o.id ? 'bg-forest text-cream' : 'text-ink hover:bg-canvas'}`}>{o.label}</button>
+        <button key={o.id} type="button" onClick={() => onChange(o.id)} aria-pressed={value === o.id} className={`min-h-8 rounded-[.375rem] px-3 font-semibold transition-colors ${value === o.id ? 'bg-forest text-cream' : 'text-ink hover:bg-canvas'}`}>{o.label}</button>
       ))}
     </div>
   )

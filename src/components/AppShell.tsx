@@ -40,7 +40,7 @@ function AccountMenu({ name, email, onSignOut }: { name: string; email: string; 
   return (
     <div className="relative">
       {open && (
-        <div ref={menu} id={id} role="menu" aria-label="Account" className="absolute inset-x-0 bottom-full mb-2 rounded-card bg-cream p-1.5 shadow-xl">
+        <div ref={menu} id={id} role="menu" aria-label="Account" className="anim-pop-sm absolute inset-x-0 bottom-full mb-2 rounded-card bg-cream p-1.5 shadow-seam-2">
           <p className="truncate px-3 pb-1 pt-1.5 text-sm text-forest/70">{email}</p>
           <Link to="/account" role="menuitem" onClick={() => setOpen(false)} className={item}><UserRound className="h-4 w-4" aria-hidden="true" />Account</Link>
           <button type="button" role="menuitem" onClick={() => { setOpen(false); onSignOut() }} className={item}><LogOut className="h-4 w-4" aria-hidden="true" />Sign out</button>
@@ -60,7 +60,7 @@ export function AppShell({ home, nav, switcher, switcherLabel, action }: { home:
   if (!user) return null
 
   const link = ({ isActive }: { isActive: boolean }) =>
-    `flex min-h-11 shrink-0 items-center gap-3 rounded-control px-3 font-semibold no-underline md:min-h-10 ${isActive ? 'bg-cream text-forest' : 'text-cream hover:bg-cream/10'}`
+    `flex min-h-10 shrink-0 items-center gap-3 rounded-control px-3 font-semibold no-underline transition-colors ${isActive ? 'bg-cream text-forest' : 'text-cream hover:bg-cream/10'}`
   const badge = (n?: number, what = 'pending', active = false) => (n ? <span className={`ml-auto rounded-full px-1.5 text-sm font-semibold ${active ? 'bg-forest text-cream' : 'bg-cream text-forest'}`} aria-label={`${n} ${what}`}>{n}</span> : null)
 
   return (

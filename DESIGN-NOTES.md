@@ -117,3 +117,11 @@ The handoff notes that it does not establish that the name SEAM is available. Ch
   - How it is kept safe: the snippet only talks to SEAM's own address, SEAM only accepts the hand-over from the window that opened it, and the server re-shapes and clips everything. It is always shown as plain text.
 - **Notes pinned to the video:** "Add video time" puts the current moment (for example `[1:23]`) in a note, and that moment becomes a button that jumps the video there, for both clients and the team.
 - **Not built:** transcripts, an AI summary and suggested titles. They need a speech-to-text service and an AI key, which are not set up. Integrations (Linear, Jira, GitHub, Slack, Teams) were left out on purpose.
+
+## Design polish
+
+- **Motion:** dialogs fade and rise into place (a sheet from the bottom on phones), menus and toasts glide in, buttons give press feedback. All of it is short, and all of it stops when someone has reduced motion turned on. Closing is still instant.
+- **Depth and shape:** three shadow levels (`--seam-shadow-1/2/3`) and softer corners (`--seam-radius-control/card/modal`), all in `tokens.css`.
+- **Touch:** on any touch screen (`pointer: coarse`), including tablets, every control is at least 44px, whatever the window width. With a mouse, controls stay compact.
+- **Brand line:** the logo's stepped line appears in empty states and draws itself as an upload progresses.
+- **Not done:** dark mode, and a closing animation for dialogs.
