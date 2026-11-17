@@ -1,7 +1,8 @@
 import { cloneElement, forwardRef, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, type LinkProps } from 'react-router-dom'
-import { Check, ChevronDown, Loader2, VideoOff, X } from 'lucide-react'
+import { Check, ChevronDown, ListFilter, Loader2, VideoOff, X } from 'lucide-react'
+import { exactDateTime, relativeDate, relativeDateTime } from '../lib/dates'
 import { CLIENT_STATUS, SEVERITIES, STATUSES, type Kind, type RoadmapState, type Severity, type Status } from '../lib/types'
 
 // ---------- Button ----------
@@ -171,10 +172,11 @@ export function Prop({ label, children }: { label: string; children: ReactNode }
 
 // ---------- Formatting ----------
 
-export const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-export const fmtDateTime = (iso: string) =>
-  new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-/** Identifiers and timestamps use the monospace face so columns line up. */
+/** A moment or a day in plain words ("Yesterday, 3:42 PM"), with the exact time on hover. */
+export function When({ iso, date = false }: { iso: string; date?: boolean }) {
+  return <time dateTime={iso} title={exactDateTime(iso)} className="tabular-nums">{date ? relativeDate(iso) : relativeDateTime(iso)}</time>
+}
+/** Identifiers use the monospace face so columns line up. */
 export const Mono = ({ children, className = '' }: { children: ReactNode; className?: string }) => <span className={`font-mono tabular-nums ${className}`}>{children}</span>
 
 // ---------- Field: persistent label, hint, required marker, local error ----------
@@ -392,10 +394,22 @@ export function Block({ title, children, tone = 'plain', hint }: { title: string
   )
 }
 
-/** Big number tiles used at the top of both the client and admin pages. */
-export function StatTile({ label, hint, value, active, onClick }: { label: string; hint?: string; value: ReactNode; active?: boolean; onClick?: () => void }) {
-  const cls = `rounded-card border p-4 text-left ${active ? 'border-forest bg-surface ring-2 ring-forest' : 'border-line bg-surface'} ${onClick ? 'hover:border-control' : ''}`
-  const inner = (<><span className="block text-3xl font-semibold tabular-nums">{value}</span><span className="block font-semibold">{label}</span>{hint && <span className="block text-sm text-muted">{hint}</span>}</>)
+/**
+ * Big number tiles at the top of the client and admin pages. A zero is quiet; a number that needs someone's attention
+ * (`attention`) gets a soft tint. Tiles that filter show a small filter mark, so it is clear they can be pressed.
+ */
+export function StatTile({ label, hint, value, active, onClick, attention = false }: { label: string; hint?: string; value: ReactNode; active?: boolean; onClick?: () => void; attention?: boolean }) {
+  const zero = value === 0 || value === '0'
+  const hot = attention && !zero && typeof value !== 'string'
+  const cls = `relative rounded-card border p-4 text-left ${active ? 'border-forest ring-2 ring-forest' : 'border-line'} ${hot && !active ? 'bg-[var(--seam-warning-bg)]' : 'bg-surface'} ${onClick ? 'hover:border-control' : ''}`
+  const inner = (
+    <>
+      {onClick && <ListFilter className={`absolute right-3 top-3 h-4 w-4 ${active ? 'text-forest' : 'text-muted/60'}`} aria-hidden="true" />}
+      <span className={`block text-3xl font-semibold tabular-nums ${zero ? 'text-muted/60' : ''}`}>{value}</span>
+      <span className={`block font-semibold ${zero ? 'text-muted' : ''}`}>{label}</span>
+      {hint && <span className="block text-sm text-muted">{hint}</span>}
+    </>
+  )
   return onClick ? <button type="button" onClick={onClick} aria-pressed={!!active} className={cls}>{inner}</button> : <div className={cls}>{inner}</div>
 }
 

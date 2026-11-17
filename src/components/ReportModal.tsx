@@ -9,7 +9,7 @@ import { similarTo } from '../lib/similar'
 import { updateItem, useRoadmap } from '../lib/roadmap'
 import { hasSeverity, KINDS, STATUSES, type Kind, type Report, type Status } from '../lib/types'
 import { Conversation, History } from './Activity'
-import { Block, Button, Field, fmtDateTime, Modal, ModalSplit, Mono, Prop, SeveritySelect, StatusSelect, VideoEvidence } from './ui'
+import { Block, Button, Field, When, Modal, ModalSplit, Mono, Prop, SeveritySelect, StatusSelect, VideoEvidence } from './ui'
 
 /** The one report view used from the Inbox, the Tracker and the Roadmap: a large dialog, like a task view. */
 export function ReportModal({ report, onClose }: { report: Report; onClose: () => void }) {
@@ -18,7 +18,7 @@ export function ReportModal({ report, onClose }: { report: Report; onClose: () =
       size="xl"
       title={report.title}
       onClose={onClose}
-      eyebrow={<><Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>{report.clientName}</span><span className="hidden sm:contents"><span aria-hidden="true">·</span><span>{report.reporterName}</span><span aria-hidden="true">·</span><Mono>{fmtDateTime(report.createdAt)}</Mono></span></>}
+      eyebrow={<><Mono>{report.id}</Mono><span aria-hidden="true">·</span><span>{report.clientName}</span><span className="hidden sm:contents"><span aria-hidden="true">·</span><span>{report.reporterName}</span><span aria-hidden="true">·</span><When iso={report.createdAt} /></span></>}
     >
       <ReportBody report={report} />
     </Modal>

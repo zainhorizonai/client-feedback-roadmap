@@ -4,7 +4,7 @@ import { CheckCircle2 } from 'lucide-react'
 import { moveItem } from '../lib/roadmap'
 import { approveReport, useReports } from '../lib/store'
 import { ROADMAP_STATES, type RoadmapItem, type RoadmapState } from '../lib/types'
-import { Button, Modal, Field, fmtDateTime, Mono, StageBadge, StatusBadge } from './ui'
+import { Button, Modal, Field, When, Mono, StageBadge, StatusBadge } from './ui'
 
 /** A roadmap card that has no conversation of its own: its details, where it is, and who moved it. */
 export function ItemModal({ item, onClose }: { item: RoadmapItem; onClose: () => void }) {
@@ -25,7 +25,7 @@ export function ItemModal({ item, onClose }: { item: RoadmapItem; onClose: () =>
             {ROADMAP_STATES.map((s) => <option key={s}>{s}</option>)}
           </select>
         </Field>
-        {item.lastMove && <p className="mt-2 text-sm text-muted">{item.lastMove.text}, by {item.lastMove.by === 'client' ? 'you' : 'the team'} · <Mono>{fmtDateTime(item.lastMove.at)}</Mono></p>}
+        {item.lastMove && <p className="mt-2 text-sm text-muted">{item.lastMove.text}, by {item.lastMove.by === 'client' ? 'you' : 'the team'} · <When iso={item.lastMove.at} /></p>}
       </div>
 
       {linked.length > 0 && (

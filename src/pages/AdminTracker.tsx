@@ -10,7 +10,7 @@ import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Report, type Severity, t
 import { EditableCell } from '../components/EditableCell'
 import { ReportModal } from '../components/ReportModal'
 import { ProjectChips } from '../components/ProjectFilter'
-import { Button, EmptyState, fmtDate, Mono, PageHeader, SeveritySelect, Skeleton, StatTile, StatusSelect } from '../components/ui'
+import { Button, EmptyState, When, Mono, PageHeader, SeveritySelect, Skeleton, StatTile, StatusSelect } from '../components/ui'
 import { notify } from '../lib/toast'
 
 type SortKey = 'id' | 'createdAt' | 'title' | 'severity' | 'status'
@@ -141,7 +141,7 @@ export function AdminTracker() {
   return (
     <>
       <PageHeader
-        eyebrow={label}
+        eyebrow={isAll ? undefined : label}
         title="Tracker"
         subtitle={loaded ? `${rows.length} of ${reports.filter((r) => matches(r.clientId)).length} reports${isAll ? ' in all projects' : ` in ${label}`}` : undefined}
         actions={
@@ -157,7 +157,7 @@ export function AdminTracker() {
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" role="group" aria-label="Quick filters">
         <StatTile label="Mine" hint="Open and assigned to you" value={loaded ? reports.filter((r) => matches(r.clientId) && r.status !== 'Resolved' && r.assignee?.id === user?.id).length : '–'} active={filters.assignee === 'me'} onClick={() => f({ assignee: filters.assignee === 'me' ? '' : 'me' })} />
         {([['New', 'New', 'Waiting for triage'], ['In progress', 'In progress', 'Being worked on'], ['Needs client input', 'Waiting on client', 'We asked them something'], ['Ready to verify', 'Ready to verify', 'Fixed, awaiting the client']] as const).map(([status, name, hint]) => (
-          <StatTile key={status} label={name} hint={hint} value={loaded ? reports.filter((r) => matches(r.clientId) && r.status === status).length : '–'} active={filters.status === status} onClick={() => f({ status: filters.status === status ? '' : status })} />
+          <StatTile key={status} attention={status === 'New' || status === 'Needs client input'} label={name} hint={hint} value={loaded ? reports.filter((r) => matches(r.clientId) && r.status === status).length : '–'} active={filters.status === status} onClick={() => f({ status: filters.status === status ? '' : status })} />
         ))}
       </div>
 
@@ -267,7 +267,7 @@ export function AdminTracker() {
                   onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button, a, input, textarea, label')) openReport(r.id) }}
                 >
                   {visible('id') && <th scope="row" className={`${td} sticky left-0 z-[5] bg-surface px-2 text-left font-normal`}><label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-[var(--seam-terracotta)]" aria-label={`Select ${r.id}`} checked={picked.has(r.id)} onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(r.id); else n.delete(r.id); return n })} /><Mono>{r.id}</Mono></label></th>}
-                  {visible('createdAt') && <td className={`${td} whitespace-nowrap px-2`}><Mono>{fmtDate(r.createdAt)}</Mono></td>}
+                  {visible('createdAt') && <td className={`${td} whitespace-nowrap px-2`}><When iso={r.createdAt} date /></td>}
                   {visible('project') && <td className={`${td} whitespace-nowrap px-2`}>{r.clientName}</td>}
                   {visible('reporter') && <td className={`${td} whitespace-nowrap px-2 text-muted`}>{r.reporterName}</td>}
                   {visible('kind') && <td className={`${td} whitespace-nowrap px-2`}>{r.kind}</td>}
@@ -294,7 +294,7 @@ export function AdminTracker() {
                   {visible('assignee') && <td className={`${td} whitespace-nowrap px-2`}>{r.assignee ? (r.assignee.id === user?.id ? 'You' : r.assignee.name) : <span className="text-muted">Unassigned</span>}</td>}
                   {visible('age') && <td className={`${td} whitespace-nowrap px-2 text-muted`}>{waitingText(r).replace('Waiting ', '') || '—'}</td>}
                   {visible('resolution') && <td className={`${td} px-2`}>{r.resolutionUrl ? <a href={r.resolutionUrl} target="_blank" rel="noreferrer" className="font-semibold">Watch<span className="sr-only"> resolution video for {r.id} (opens in a new tab)</span></a> : <span className="text-muted">None</span>}</td>}
-                  {visible('resolvedAt') && <td className={`${td} whitespace-nowrap px-2`}>{r.resolvedAt ? <Mono>{fmtDate(r.resolvedAt)}</Mono> : <span className="text-muted">—</span>}</td>}
+                  {visible('resolvedAt') && <td className={`${td} whitespace-nowrap px-2`}>{r.resolvedAt ? <When iso={r.resolvedAt} date /> : <span className="text-muted">—</span>}</td>}
                 </tr>
               ))}
             </tbody>

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Link2 } from 'lucide-react'
 import { ROADMAP_STATES, type RoadmapState } from '../lib/types'
 import type { Entry } from '../lib/entries'
-import { ClientStatusBadge, fmtDate, KindTag, Mono, StageBadge } from './ui'
+import { ClientStatusBadge, When, KindTag, Mono, StageBadge } from './ui'
 
 interface Props {
   entries: Entry[]
@@ -67,7 +67,7 @@ export function ItemsBoard({ entries, onMove, onOpenItem }: Props) {
                       {e.waiting && <span className="badge badge-warning">Waiting for you</span>}
                     </div>
                     {(e.item?.linkedCount ?? 0) > 1 && <p className="mt-2 flex items-center gap-1 text-sm text-muted"><Link2 className="h-3.5 w-3.5" aria-hidden="true" />{e.item!.linkedCount} linked reports</p>}
-                    {e.moved && <p className="mt-2 text-xs text-muted">Moved by {e.moved.by === 'client' ? 'you' : 'the team'} · <Mono>{fmtDate(e.moved.at)}</Mono></p>}
+                    {e.moved && <p className="mt-2 text-xs text-muted">Moved by {e.moved.by === 'client' ? 'you' : 'the team'} · <When iso={e.moved.at} date /></p>}
                     {movable && (
                       <label className="mt-2 block text-sm">
                         <span className="sr-only">Move {e.title} to</span>

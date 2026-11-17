@@ -6,7 +6,7 @@ import { moveItem, useRoadmap } from '../lib/roadmap'
 import { hasSeverity, ROADMAP_STATES, type RoadmapState } from '../lib/types'
 import { Conversation, History } from '../components/Activity'
 import { videoStamp } from '../lib/environment'
-import { Block, Button, Field, fmtDateTime, KindTag, Modal, ModalSplit, Mono, SeverityBadge, StageBadge, ClientStatusBadge, VideoEvidence } from '../components/ui'
+import { Block, Button, Field, When, KindTag, Modal, ModalSplit, Mono, SeverityBadge, StageBadge, ClientStatusBadge, VideoEvidence } from '../components/ui'
 
 /** A client's view of one item: a large dialog over their list, like a task view. */
 export function ReportDetail({ id, onClose }: { id: string; onClose: () => void }) {
@@ -184,7 +184,7 @@ export function ReportDetail({ id, onClose }: { id: string; onClose: () => void 
       {card && (
         <Block title="On your roadmap" hint="Move it to where you think it belongs. The team is told.">
           <Field label="Stage"><select className="input" value={card.state} onChange={(e) => moveItem(card.id, e.target.value as RoadmapState)}>{ROADMAP_STATES.map((s) => <option key={s}>{s}</option>)}</select></Field>
-          {card.lastMove && <p className="mt-2 text-sm text-muted">{card.lastMove.text}, by {card.lastMove.by === 'client' ? 'you' : 'the team'} · <Mono>{fmtDateTime(card.lastMove.at)}</Mono></p>}
+          {card.lastMove && <p className="mt-2 text-sm text-muted">{card.lastMove.text}, by {card.lastMove.by === 'client' ? 'you' : 'the team'} · <When iso={card.lastMove.at} /></p>}
         </Block>
       )}
     </>
@@ -195,7 +195,7 @@ export function ReportDetail({ id, onClose }: { id: string; onClose: () => void 
       size="xl"
       title={report.title}
       onClose={onClose}
-      eyebrow={<><Mono>{report.id}</Mono><span className="hidden sm:contents"><span aria-hidden="true">·</span><span>Submitted <Mono>{fmtDateTime(report.createdAt)}</Mono></span></span></>}
+      eyebrow={<><Mono>{report.id}</Mono><span className="hidden sm:contents"><span aria-hidden="true">·</span><span>Submitted <When iso={report.createdAt} /></span></span></>}
       actions={!editing ? <Button variant="secondary" onClick={startEdit} className="max-sm:!px-0 max-sm:w-11"><Pencil className="h-4 w-4" aria-hidden="true" /><span className="max-sm:sr-only">Edit details</span></Button> : undefined}
     >
       <ModalSplit main={main} side={side} sideFirstOnPhone />

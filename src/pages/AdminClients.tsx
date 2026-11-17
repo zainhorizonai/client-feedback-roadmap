@@ -5,7 +5,7 @@ import { useProject } from '../lib/project'
 import { notify } from '../lib/toast'
 import type { ClientOrg } from '../lib/types'
 import { EditableCell } from '../components/EditableCell'
-import { Button, EmptyState, Field, fmtDate, Mono, PageHeader, Skeleton } from '../components/ui'
+import { Button, EmptyState, Field, When, PageHeader, Skeleton } from '../components/ui'
 
 type Person = ClientOrg['users'][number]
 
@@ -15,12 +15,18 @@ function SnippetCard() {
   return (
     <section aria-labelledby="snippet-h" className="mt-8 rounded-card border border-line bg-surface p-4">
       <h2 id="snippet-h" className="font-semibold">Capture what the page logged</h2>
-      <p className="mt-1 text-muted">Paste this into the site your clients test. It adds a small "Report a problem" button. When a client uses it, their report arrives with the browser details, the console messages and the failed requests from that page. Nothing is sent unless they report something, and they can untick it first. Web addresses are recorded without anything after the question mark.</p>
+      <p className="mt-1 text-muted">Paste this line into the site your clients test. Their reports then include the page's console messages and failed requests.</p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <code className="min-w-0 flex-1 basis-80 overflow-x-auto whitespace-nowrap rounded-control bg-canvas px-3 py-2 font-mono text-sm">{code}</code>
         <Button variant="secondary" onClick={() => { navigator.clipboard?.writeText(code).then(() => notify('Copied.'), () => notify('Copy it by hand: select the line and copy.', 'error')) }}><Copy className="h-4 w-4" aria-hidden="true" />Copy</Button>
       </div>
-      <p className="mt-2 text-sm text-muted">Options: add <code className="font-mono">data-button="off"</code> to use your own button that calls <code className="font-mono">SEAM.open()</code>, or <code className="font-mono">data-capture="console"</code> to leave out network requests.</p>
+      <details className="mt-3 text-sm">
+        <summary className="cursor-pointer font-semibold">Options and privacy</summary>
+        <div className="mt-2 space-y-1.5 text-muted">
+          <p>It adds a small "Report a problem" button. Nothing is sent unless a client reports something, and they can untick it first. Web addresses are recorded without anything after the question mark.</p>
+          <p>Add <code className="font-mono">data-button="off"</code> to use your own button that calls <code className="font-mono">SEAM.open()</code>, or <code className="font-mono">data-capture="console"</code> to leave out network requests.</p>
+        </div>
+      </details>
     </section>
   )
 }
@@ -108,7 +114,7 @@ export function AdminClients() {
 
   return (
     <div className="max-w-4xl">
-      <PageHeader title="Projects and people" subtitle="Rename a project or a person by clicking the name. Invite people, send an invitation again, or take their access away. Each person only sees the projects they belong to." />
+      <PageHeader title="Projects and people" subtitle="Click a name to rename it." />
 
       <form onSubmit={addProject} className="mb-6 flex flex-wrap items-end gap-2">
         <Field label="New project" className="min-w-[14rem] flex-1"><input required className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Project or client name" /></Field>
@@ -171,7 +177,7 @@ export function AdminClients() {
                         <div className="flex flex-wrap items-center gap-2">
                           {u.hasPassword
                             ? <span className="badge badge-success">Accepted</span>
-                            : <span className="badge badge-warning">Invited, not accepted{u.invitedAt ? <> · <Mono>{fmtDate(u.invitedAt)}</Mono></> : null}</span>}
+                            : <span className="badge badge-warning">Invited, not accepted{u.invitedAt ? <> · <When iso={u.invitedAt} date /></> : null}</span>}
                           <Button variant="secondary" onClick={() => resend(u)}><MailPlus className="h-4 w-4" aria-hidden="true" />{u.hasPassword ? 'Send reset link' : 'Resend invite'}</Button>
                           <Button variant="tertiary" onClick={() => setRemoving(confirming ? null : { projectId: p.id, personId: u.id })} aria-expanded={confirming}><UserMinus className="h-4 w-4" aria-hidden="true" />Remove<span className="sr-only"> {u.name} from {p.name}</span></Button>
                         </div>

@@ -7,14 +7,14 @@ import { useAuth } from '../lib/auth'
 import { waitingText } from '../lib/waiting'
 import { hasSeverity, type Report, type Severity } from '../lib/types'
 import { ReportModal } from '../components/ReportModal'
-import { Button, EmptyState, fmtDateTime, KindTag, Mono, PageHeader, SeveritySelect, Skeleton } from '../components/ui'
+import { Button, EmptyState, When, KindTag, Mono, PageHeader, SeveritySelect, Skeleton } from '../components/ui'
 
 type Sort = 'newest' | 'oldest' | 'severity'
 const RANK: Record<Severity, number> = { Blocker: 0, High: 1, Medium: 2, Low: 3 }
 
 /** The triage queue: new submissions waiting for a first decision. It shows the same records as the Tracker. */
 export function AdminInbox() {
-  const { matches, label, selectedIds } = useProject()
+  const { matches, label, selectedIds, isAll } = useProject()
   const { user } = useAuth()
   const reports = useReports()
   const loaded = useReportsLoaded()
@@ -41,7 +41,7 @@ export function AdminInbox() {
   return (
     <>
       <PageHeader
-        eyebrow={label}
+        eyebrow={isAll ? undefined : label}
         title="Inbox"
         subtitle={loaded ? `${queue.length} new ${queue.length === 1 ? 'report' : 'reports'} waiting for triage` : undefined}
         actions={
@@ -71,7 +71,7 @@ export function AdminInbox() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-                    <Mono>{r.id}</Mono><span aria-hidden="true">·</span><span>{r.clientName}</span><span aria-hidden="true">·</span><span>{r.reporterName}</span><span aria-hidden="true">·</span><Mono>{fmtDateTime(r.createdAt)}</Mono>
+                    <Mono>{r.id}</Mono><span aria-hidden="true">·</span><span>{r.clientName}</span><span aria-hidden="true">·</span><span>{r.reporterName}</span><span aria-hidden="true">·</span><When iso={r.createdAt} />
                     {waitingText(r) && <span className="badge badge-warning">{waitingText(r)}</span>}
                   </p>
                   <button type="button" onClick={() => setParams({ report: r.id }, { replace: true })} className="mt-1 text-left font-semibold hover:underline">{r.title}</button>

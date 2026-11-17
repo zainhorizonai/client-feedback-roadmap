@@ -14,7 +14,7 @@ const blank = (clientId: string): Draft => ({ clientId, title: '', description: 
 const fromItem = (i: RoadmapItem): Draft => ({ clientId: i.clientId, title: i.title, description: i.description, state: i.state, targetWindow: i.targetWindow, clientUpdate: i.clientUpdate, published: !!i.published, reportIds: (i.reports ?? []).map((r) => r.id) })
 
 export function AdminRoadmap() {
-  const { projects, matches, label, single, selectedIds } = useProject()
+  const { projects, matches, label, single, selectedIds, isAll } = useProject()
   const all = useRoadmap()
   const loaded = useRoadmapLoaded()
   const reports = useReports()
@@ -31,7 +31,7 @@ export function AdminRoadmap() {
   return (
     <>
       <PageHeader
-        eyebrow={label}
+        eyebrow={isAll ? undefined : label}
         title="Roadmap"
         subtitle="Plan work for clients. Nothing is visible to them until you publish it."
         actions={

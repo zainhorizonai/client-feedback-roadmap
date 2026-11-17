@@ -9,7 +9,7 @@ import { CLIENT_STATUS, ROADMAP_STATES, STATUSES, type RoadmapState } from '../l
 import { ItemsBoard } from '../components/ItemsBoard'
 import { ItemModal } from '../components/ItemModal'
 import { ReportDetail } from './ReportDetail'
-import { Button, EmptyState, fmtDate, KindTag, Mono, PageHeader, Segmented, Skeleton, StageBadge, StatTile, ClientStatusBadge } from '../components/ui'
+import { Button, EmptyState, When, KindTag, Mono, PageHeader, Segmented, Skeleton, StageBadge, StatTile, ClientStatusBadge } from '../components/ui'
 
 type View = 'list' | 'board'
 type Type = 'all' | 'fixes' | 'roadmap'
@@ -22,8 +22,7 @@ const TYPES: { id: Type; label: string }[] = [{ id: 'all', label: 'All' }, { id:
  * narrow it to bugs or to the roadmap, and filter by what is pending, waiting for them, or done.
  */
 export function ClientHome() {
-  const { selectedId, projects } = useClientProject()
-  const project = projects.find((p) => p.id === selectedId)
+  const { selectedId } = useClientProject()
   const reports = useReports()
   const items = useRoadmap()
   // Both hooks must always run, so read them separately before combining.
@@ -65,12 +64,12 @@ export function ClientHome() {
   const drawerEntry = all.find((e) => e.item?.id === openItem)
 
   const tile = (id: Show, label: string, n: number, hint: string) => (
-    <StatTile label={label} hint={hint} value={<span aria-label={loaded ? `${n}` : 'loading'}>{loaded ? n : '–'}</span>} active={show === id} onClick={() => set({ show: show === id ? 'all' : id })} />
+    <StatTile attention={id === 'waiting'} label={label} hint={hint} value={<span aria-label={loaded ? `${n}` : 'loading'}>{loaded ? n : '–'}</span>} active={show === id} onClick={() => set({ show: show === id ? 'all' : id })} />
   )
 
   return (
     <>
-      <PageHeader eyebrow={project?.name} title="My items" subtitle="UAT/Bugs, feature requests and questions, all in one place." />
+      <PageHeader title="My items" subtitle="UAT/Bugs, feature requests and questions, all in one place." />
 
       <div className="mb-6 grid gap-3 sm:grid-cols-3" role="group" aria-label="Quick filters">
         {tile('pending', 'Pending', counts.pending, 'Not done yet')}
@@ -108,7 +107,7 @@ export function ClientHome() {
               <>
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-                    <Mono>{e.ref}</Mono><span aria-hidden="true">·</span><Mono>{fmtDate(e.createdAt)}</Mono><KindTag kind={e.tag === 'Roadmap item' ? 'Feature request' : e.tag} />
+                    <Mono>{e.ref}</Mono><span aria-hidden="true">·</span><When iso={e.createdAt} date /><KindTag kind={e.tag === 'Roadmap item' ? 'Feature request' : e.tag} />
                     {e.tag === 'Roadmap item' && <span>Roadmap item</span>}
                   </p>
                   <p className="mt-1 break-words font-semibold">{e.title}</p>

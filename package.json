@@ -10,7 +10,7 @@
     "server:watch": "node --env-file-if-exists=.env --import tsx --watch server/index.ts",
     "start": "NODE_ENV=production node --env-file-if-exists=.env --import tsx server/index.ts",
     "seed": "node --env-file-if-exists=.env --import tsx server/seed.ts",
-    "test": "node --import tsx --test server/test/api.test.ts",
+    "test": "node --import tsx --test server/test/api.test.ts server/test/dates.test.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },

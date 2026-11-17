@@ -1,6 +1,6 @@
 import { ArrowRight, CheckCircle2, Circle, RotateCcw } from 'lucide-react'
 import type { HistoryEntry } from '../lib/types'
-import { fmtDateTime, Mono } from './ui'
+import { When } from './ui'
 import { seekVideo } from '../lib/environment'
 
 /** Turns [1:23] in a note into a button that jumps the video to that moment. */
@@ -26,7 +26,7 @@ export function Conversation({ history, viewer }: { history: HistoryEntry[]; vie
             <div className={`max-w-[92%] rounded-card px-3 py-2 ${m.by === 'admin' ? 'bg-forest text-cream' : 'border border-line bg-surface'}`}>
               <p className="whitespace-pre-wrap break-words"><WithStamps text={m.text} /></p>
             </div>
-            <p className="mt-1 text-xs text-muted">{who} · <Mono>{fmtDateTime(m.at)}</Mono></p>
+            <p className="mt-1 text-xs text-muted">{who} · <When iso={m.at} /></p>
           </li>
         )
       })}
@@ -55,7 +55,7 @@ export function History({ history }: { history: HistoryEntry[] }) {
             ) : (
               <p className={outcome ? 'font-semibold' : ''}>{e.text}</p>
             )}
-            <p className="text-xs text-muted">{e.by === 'admin' ? 'SEAM team' : e.by === 'client' ? 'Client' : 'System'} · <Mono>{fmtDateTime(e.at)}</Mono></p>
+            <p className="text-xs text-muted">{e.by === 'admin' ? 'SEAM team' : e.by === 'client' ? 'Client' : 'System'} · <When iso={e.at} /></p>
           </li>
         )
       })}
