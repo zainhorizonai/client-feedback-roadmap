@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Link2 } from 'lucide-react'
 import { ROADMAP_STATES, type RoadmapState } from '../lib/types'
 import type { Entry } from '../lib/entries'
-import { fmtDate, KindTag, Mono, StageBadge, StatusBadge } from './ui'
+import { ClientStatusBadge, fmtDate, KindTag, Mono, StageBadge } from './ui'
 
 interface Props {
   entries: Entry[]
@@ -63,7 +63,7 @@ export function ItemsBoard({ entries, onMove, onOpenItem }: Props) {
                     {e.item?.targetWindow && <p className="mt-1 text-sm"><span className="text-muted">Target: </span>{e.item.targetWindow}</p>}
                     {e.item?.clientUpdate && <p className="mt-2 rounded-control bg-canvas px-2 py-1.5 text-sm"><span className="font-semibold">Update: </span>{e.item.clientUpdate}</p>}
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                      {e.status ? <StatusBadge status={e.status} /> : <StageBadge stage={e.stage} />}
+                      {e.status ? <ClientStatusBadge status={e.status} /> : <StageBadge stage={e.stage} />}
                       {e.waiting && <span className="badge badge-warning">Waiting for you</span>}
                     </div>
                     {(e.item?.linkedCount ?? 0) > 1 && <p className="mt-2 flex items-center gap-1 text-sm text-muted"><Link2 className="h-3.5 w-3.5" aria-hidden="true" />{e.item!.linkedCount} linked reports</p>}

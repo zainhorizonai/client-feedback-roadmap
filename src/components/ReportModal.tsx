@@ -23,6 +23,10 @@ export function ReportModal({ report, onClose }: { report: Report; onClose: () =
 function ReportBody({ report }: { report: Report }) {
   const items = useRoadmap()
   const [reply, setReply] = useState('')
+  // After sending, the status can move too. Left alone it follows the reply: a question waits for the client.
+  const [chosen, setChosen] = useState<Status | null>(null)
+  const auto: Status = reply.includes('?') ? 'Needs client input' : report.status === 'New' ? 'Triaging' : report.status
+  const afterStatus = chosen ?? auto
   const [sending, setSending] = useState(false)
   const [notes, setNotes] = useState(report.notes ?? '')
   const [savingNotes, setSavingNotes] = useState(false)
@@ -31,14 +35,14 @@ function ReportBody({ report }: { report: Report }) {
   const [linking, setLinking] = useState('')
 
   // Switching to another report resets the drafts. Edits to the same report keep them.
-  useEffect(() => { setNotes(report.notes ?? ''); setResolution(report.resolutionUrl); setReply('') }, [report.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setNotes(report.notes ?? ''); setResolution(report.resolutionUrl); setReply(''); setChosen(null) }, [report.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const linked = report.roadmapItems ?? []
   const linkable = items.filter((i) => i.clientId === report.clientId && !linked.some((l) => l.id === i.id))
 
   async function send() {
     setSending(true)
-    if (await addReply(report.id, reply)) setReply('')
+    if (await addReply(report.id, reply, afterStatus)) { setReply(''); setChosen(null) }
     setSending(false)
   }
   async function saveNotes() { setSavingNotes(true); await updateFields(report.id, { notes }); setSavingNotes(false) }
@@ -68,7 +72,13 @@ function ReportBody({ report }: { report: Report }) {
           <Field label="Shared reply">
             <textarea className="input" rows={3} value={reply} onChange={(e) => setReply(e.target.value)} />
           </Field>
-          <div className="mt-2 flex justify-end">
+          <div className="mt-2 flex flex-wrap items-end justify-end gap-3">
+            <label className="text-sm">
+              <span className="mb-1 block font-semibold">Then set status to</span>
+              <select className="input !w-auto" value={afterStatus} onChange={(e) => setChosen(e.target.value as Status)}>
+                {STATUSES.map((st) => <option key={st} value={st}>{st === report.status ? `${st} (no change)` : st}</option>)}
+              </select>
+            </label>
             <Button onClick={send} pending={sending} disabled={!reply.trim()}><Send className="h-4 w-4" aria-hidden="true" /> Send reply</Button>
           </div>
         </div>

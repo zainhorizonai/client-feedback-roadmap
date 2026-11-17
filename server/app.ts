@@ -3,7 +3,7 @@ import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { config } from './config.js'
-import { all, batch, createRoadmapItemForReport, isUniqueViolation, one, ROADMAP_KINDS, run } from './db.js'
+import { all, batch, createRoadmapItemForReport, isUniqueViolation, makeClientCode, one, ROADMAP_KINDS, run } from './db.js'
 import { changePassword, checkPasswordToken, clientIp, login, logout, passwordProblem, rateLimited, recordFailure, requestPasswordEmail, resetPassword, sendPasswordEmail, tooManyFailures, withUser, type AuthUser } from './auth.js'
 import { escapeHtml, layout, sendEmail, sendQuietly } from './email.js'
 import { blobPrefix, extFor, getStorage, isAllowedMime, normalizeMime, TooLargeError } from './storage.js'
@@ -17,8 +17,6 @@ const KINDS = ['Bug', 'UAT finding', 'Feature request', 'Question'] as const
 const ROADMAP_STATES = ['Under review', 'Planned', 'In progress', 'Done'] as const
 type Status = (typeof STATUSES)[number]
 type Kind = (typeof KINDS)[number]
-// The number is shared across all types, so BUG-0003 and REQ-0004 can never collide.
-const ID_PREFIX: Record<Kind, string> = { Bug: 'BUG', 'UAT finding': 'UAT', 'Feature request': 'REQ', Question: 'Q' }
 
 // ---------- helpers ----------
 
@@ -387,20 +385,30 @@ app.get('/api/reports/:id', async (c) => {
   return c.json({ report: await withHistory(await loadReport(user, c.req.param('id')), user) })
 })
 
-/** Numbers are sequential (BUG-0001...). Two requests can pick the same next number; the unique
- *  constraint rejects the loser, which simply retries. */
+/** Each project counts its own items (ACME-1, ACME-2...). The counter moves in one atomic statement, so two
+ *  requests never get the same number. The separate global `seq` only keeps the list in order; if two requests
+ *  pick the same one, the unique constraint rejects the loser, which simply retries. */
 async function insertReport(f: {
   clientId: string; reporterId: string; title: string; description: string; pageUrl: string
   severity: string; kind: Kind; submittedAt: string | null
 }): Promise<string> {
+  const counter = await one<{ code: string | null; report_seq: number; name: string }>('UPDATE clients SET report_seq = report_seq + 1 WHERE id = $1 RETURNING code, report_seq, name', f.clientId)
+  if (!counter) throw new HttpError(404, 'Project not found')
+  let code = counter.code
+  if (!code) {
+    const taken = new Set((await all<{ code: string }>('SELECT code FROM clients WHERE code IS NOT NULL')).map((x) => x.code))
+    code = makeClientCode(counter.name, taken)
+    await run('UPDATE clients SET code = $1 WHERE id = $2 AND code IS NULL', code, f.clientId)
+  }
+  const id = `${code}-${counter.report_seq}`
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       const row = await one<{ id: string }>(
         `INSERT INTO reports (id, seq, created_at, client_id, reporter_id, title, description, page_url, severity, kind, submitted_at)
-         SELECT $10::text || '-' || LPAD(n::text, 4, '0'), n, $1, $2, $3, $4, $5, $6, $7, $8, $9::text
+         SELECT $10::text, n, $1, $2, $3, $4, $5, $6, $7, $8, $9::text
            FROM (SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM reports) s
          RETURNING id`,
-        now(), f.clientId, f.reporterId, f.title, f.description, f.pageUrl, f.severity, f.kind, f.submittedAt, ID_PREFIX[f.kind],
+        now(), f.clientId, f.reporterId, f.title, f.description, f.pageUrl, f.severity, f.kind, f.submittedAt, id,
       )
       if (row) return row.id
     } catch (e) {
@@ -600,13 +608,27 @@ app.patch('/api/reports/:id', async (c) => {
   return c.json({ report: await withHistory(await loadReport(admin, r.id), admin) })
 })
 
+/** Statements that move a report to a new status, with the history entries that explain it. */
+function statusStmts(r: ReportRow, to: Status, by: 'admin' = 'admin'): Stmt[] {
+  return [
+    ['UPDATE reports SET status = $1, resolved_at = $2 WHERE id = $3', [to, to === 'Resolved' ? now() : null, r.id]],
+    historyStmt(r.id, by, 'status', `Status changed from ${r.status} to ${to}`, r.status, to),
+    ...(to === 'Resolved' ? [historyStmt(r.id, by, 'outcome', 'Closed by admin')] : []),
+  ]
+}
+
+// A reply can also move the status in the same step, so the client gets one email and the board stays true.
 app.post('/api/reports/:id/replies', async (c) => {
   const admin = requireAdmin(c)
   const r = await loadReport(admin, c.req.param('id'))
-  const msg = text((await json(c)).text, 'text', 4000, true)
-  await addHistory(r.id, 'admin', 'reply', msg)
-  await mailClient(r, `New update on ${r.id}`, [`An update on "${r.title}":`, msg])
-  return c.json({ report: await withHistory(r, admin) })
+  const body = await json(c)
+  const msg = text(body.text, 'text', 4000, true)
+  const wanted = body.status === undefined || body.status === null || body.status === '' ? null : oneOf(body.status, STATUSES, 'status')
+  const change = wanted && wanted !== r.status ? wanted : null
+  await batch([historyStmt(r.id, 'admin', 'reply', msg), ...(change ? statusStmts(r, change) : [])])
+  const say = change && STATUS_EMAIL[change]
+  await mailClient(r, change === 'Needs client input' ? `We need your input on ${r.id}` : `New update on ${r.id}`, [`An update on "${r.title}":`, msg, ...(say ? say(r) : [])])
+  return c.json({ report: await withHistory(await loadReport(admin, r.id), admin) })
 })
 
 app.post('/api/reports/:id/comments', async (c) => {
@@ -790,7 +812,7 @@ app.get('/api/roadmap', async (c) => {
 async function linkStatements(itemId: string, clientId: string, reportIds: unknown): Promise<Stmt[]> {
   if (!Array.isArray(reportIds) || reportIds.length > 100 || reportIds.some((x) => typeof x !== 'string')) throw new HttpError(400, 'reportIds must be a list of report ids')
   const ids = [...new Set(reportIds as string[])]
-  if (ids.some((i) => !/^[A-Z]+-\d{4,}$/.test(i))) throw new HttpError(400, 'Invalid report id')
+  if (ids.some((i) => !/^[A-Z0-9]+-\d+$/.test(i))) throw new HttpError(400, 'Invalid report id')
   if (ids.length) {
     const ok = await all<{ id: string }>('SELECT id FROM reports WHERE id = ANY($1::text[]) AND client_id = $2', `{${ids.map((i) => `"${i}"`).join(',')}}`, clientId)
     if (ok.length !== ids.length) throw new HttpError(400, 'Some reports were not found in this project')
@@ -920,7 +942,8 @@ app.post('/api/admin/clients', async (c) => {
   requireAdmin(c)
   const name = text((await json(c)).name, 'name', 100, true)
   const id = crypto.randomUUID()
-  await run('INSERT INTO clients (id, name, created_at) VALUES ($1, $2, $3)', id, name, now())
+  const taken = new Set((await all<{ code: string }>('SELECT code FROM clients WHERE code IS NOT NULL')).map((x) => x.code))
+  await run('INSERT INTO clients (id, name, created_at, code) VALUES ($1, $2, $3, $4)', id, name, now(), makeClientCode(name, taken))
   return c.json({ client: { id, name, users: [] } }, 201)
 })
 

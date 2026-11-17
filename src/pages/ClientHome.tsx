@@ -5,11 +5,11 @@ import { useClientProject } from '../lib/clientProject'
 import { moveItem, useRoadmap, useRoadmapLoaded } from '../lib/roadmap'
 import { useReports, useReportsLoaded } from '../lib/store'
 import { buildEntries, countEntries, type Entry } from '../lib/entries'
-import { ROADMAP_STATES, STATUSES, type RoadmapState } from '../lib/types'
+import { CLIENT_STATUS, ROADMAP_STATES, STATUSES, type RoadmapState } from '../lib/types'
 import { ItemsBoard } from '../components/ItemsBoard'
 import { ItemModal } from '../components/ItemModal'
 import { ReportDetail } from './ReportDetail'
-import { Button, EmptyState, fmtDate, KindTag, Mono, PageHeader, Segmented, Skeleton, StageBadge, StatTile, StatusBadge } from '../components/ui'
+import { Button, EmptyState, fmtDate, KindTag, Mono, PageHeader, Segmented, Skeleton, StageBadge, StatTile, ClientStatusBadge } from '../components/ui'
 
 type View = 'list' | 'board'
 type Type = 'all' | 'fixes' | 'roadmap'
@@ -83,7 +83,7 @@ export function ClientHome() {
         <Segmented<Type> label="Show" value={type} options={TYPES} onChange={(v) => set({ type: v })} />
         <select className="input !w-auto" aria-label="Filter by status" value={status} onChange={(e) => set({ status: e.target.value })}>
           <option value="">Any status</option>
-          <optgroup label="Fix status">{STATUSES.map((s) => <option key={s} value={`s:${s}`}>{s}</option>)}</optgroup>
+          <optgroup label="Fix status">{STATUSES.map((s) => <option key={s} value={`s:${s}`}>{CLIENT_STATUS[s]}</option>)}</optgroup>
           <optgroup label="Roadmap stage">{ROADMAP_STATES.map((s) => <option key={s} value={`r:${s}`}>{s}</option>)}</optgroup>
         </select>
         <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
@@ -115,7 +115,7 @@ export function ClientHome() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {e.waiting && <span className="badge badge-warning">Waiting for you</span>}
-                  {e.status ? <StatusBadge status={e.status} /> : <StageBadge stage={e.stage} />}
+                  {e.status ? <ClientStatusBadge status={e.status} /> : <StageBadge stage={e.stage} />}
                 </div>
               </>
             )

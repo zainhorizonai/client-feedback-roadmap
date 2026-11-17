@@ -3,6 +3,11 @@ export type Role = 'client' | 'admin'
 export const STATUSES = ['New', 'Triaging', 'In progress', 'Needs client input', 'Ready to verify', 'Resolved'] as const
 export type Status = (typeof STATUSES)[number]
 
+/** What a client sees. The team keeps the finer statuses; clients get plain words. */
+export const CLIENT_STATUS: Record<Status, string> = {
+  New: 'Received', Triaging: 'Reviewing', 'In progress': 'In progress', 'Needs client input': 'Needs you', 'Ready to verify': 'Ready to verify', Resolved: 'Done',
+}
+
 export const SEVERITIES = ['Low', 'Medium', 'High', 'Blocker'] as const
 export type Severity = (typeof SEVERITIES)[number]
 

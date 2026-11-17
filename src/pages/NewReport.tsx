@@ -1,13 +1,14 @@
 import { useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Bug, CheckCircle2, ClipboardCheck, HelpCircle, Lightbulb, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, Bug, ClipboardCheck, HelpCircle, Lightbulb, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useClientProject } from '../lib/clientProject'
 import { ApiError } from '../lib/api'
 import { createReport } from '../lib/store'
-import { hasSeverity, SEVERITIES, type Kind, type Severity } from '../lib/types'
+import { hasSeverity, type Kind } from '../lib/types'
 import { Recorder } from '../components/Recorder'
-import { Button, ButtonLink, Field, Mono, SeamDivider } from '../components/ui'
+import { Button, Field } from '../components/ui'
+import { notify } from '../lib/toast'
 
 const OPTIONS: { kind: Kind; icon: LucideIcon; hint: string; param: string }[] = [
   { kind: 'Bug', icon: Bug, hint: 'Something is broken', param: 'bug' },
@@ -34,10 +35,10 @@ export function NewReport() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [pageUrl, setPageUrl] = useState('')
-  const [severity, setSeverity] = useState<Severity>('Medium')
+  // Clients say whether this is stopping their work. The team sets the real severity when they triage.
+  const [blocking, setBlocking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [doneId, setDoneId] = useState<string | null>(null)
   const [titleError, setTitleError] = useState('')
   const [error, setError] = useState('')
   const titleRef = useRef<HTMLInputElement>(null)
@@ -57,33 +58,16 @@ export function NewReport() {
     setProgress(0)
     setError('')
     try {
-      const r = await createReport({ clientId: projectId, title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) ? severity : 'Medium', kind }, video, setProgress)
-      setDoneId(r.id)
+      const r = await createReport({ clientId: projectId, title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) && blocking ? 'High' : 'Medium', kind }, video, setProgress)
+      // Straight to the item, over the list, so they can see it and add to it.
+      notify(onRoadmap ? `Added to your roadmap as ${r.id}.` : `Sent as ${r.id}. We will update you here and by email.`)
+      nav(`/reports/${r.id}`)
     } catch (err) {
       // Everything they typed, and the video, stay in place so Retry is one click.
       setError(err instanceof ApiError ? err.message : 'It did not send. Check your connection and try again.')
     } finally {
       setBusy(false)
     }
-  }
-
-  if (doneId) {
-    return (
-      <div className="mx-auto max-w-md pt-6">
-        <div className="overflow-hidden rounded-card border border-line bg-surface text-center">
-          <SeamDivider />
-          <div className="p-6" role="status">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-[var(--seam-success-fg)]" aria-hidden="true" />
-            <h1 className="mt-3 font-semibold">{onRoadmap ? 'Added to your roadmap' : 'Report received'}</h1>
-            <p className="mt-2 text-muted">Your reference is <Mono className="font-semibold text-ink">{doneId}</Mono>. {onRoadmap ? 'You can follow it and move it between stages on your roadmap.' : 'We will update you here and by email.'}</p>
-            <div className="mt-5 flex flex-col items-center gap-2">
-              <Button onClick={() => nav(`/reports/${doneId}`)}>View</Button>
-              <ButtonLink to="/reports" variant="tertiary">Back to my items</ButtonLink>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
   }
 
   const videoFirst = kind === 'Bug' || kind === 'UAT finding'
@@ -135,18 +119,15 @@ export function NewReport() {
           <Field label={copy.detail}>
             <textarea className="input" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} />
           </Field>
-          <div className={`grid gap-4 ${hasSeverity(kind) ? 'sm:grid-cols-2' : ''}`}>
-            <Field label="Page or link" hint="Optional. Where did this happen?">
-              <input className="input" value={pageUrl} onChange={(e) => setPageUrl(e.target.value)} placeholder="https://…" />
-            </Field>
-            {hasSeverity(kind) && (
-              <Field label="Severity" hint="How much does it get in your way?">
-                <select className="input" value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
-                  {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
-                </select>
-              </Field>
-            )}
-          </div>
+          <Field label="Page or link" hint="Optional. Where did this happen?">
+            <input className="input" value={pageUrl} onChange={(e) => setPageUrl(e.target.value)} placeholder="https://…" />
+          </Field>
+          {hasSeverity(kind) && (
+            <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line bg-surface p-3">
+              <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--seam-terracotta)]" checked={blocking} onChange={(e) => setBlocking(e.target.checked)} />
+              <span><span className="font-semibold">This is stopping us from working</span><span className="block text-sm text-muted">Tick it if we should look at this first.</span></span>
+            </label>
+          )}
         </section>
 
         {!videoFirst && videoSection}

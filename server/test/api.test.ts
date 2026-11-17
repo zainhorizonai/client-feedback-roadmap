@@ -106,7 +106,7 @@ describe('portal API', () => {
     const created = await jane.json('POST', '/api/reports', { title: 'Save button does nothing', description: 'd', severity: 'High' })
     assert.equal(created.status, 201)
     reportId = created.data.report.id
-    assert.match(reportId, /^BUG-\d{4}$/)
+    assert.match(reportId, /^ACME-\d+$/)
     assert.equal((await jane.json('GET', '/api/reports')).data.reports.length, 0)
     assert.equal((await admin.json('GET', '/api/reports')).data.reports.length, 0)
   })
@@ -519,8 +519,8 @@ describe('optional video, item types and the roadmap', () => {
     const mine = (await jane.json('GET', '/api/reports')).data.reports as Json[]
     assert.ok(mine.some((x) => x.id === r.data.report.id), 'visible to the client at once')
     assert.ok(((await admin.json('GET', '/api/reports')).data.reports as Json[]).some((x) => x.id === r.data.report.id), 'visible to the admin')
-    assert.ok(mails.some((m) => /^New report from Acme · BUG-\d+/.test(m.subject) && m.to.includes('admin@test.com') && /No video bug/.test(m.text)), 'admin emailed')
-    assert.ok(mails.some((m) => /^We received your report · BUG-\d+/.test(m.subject) && m.to.includes('jane@acme.com')), 'client got a receipt')
+    assert.ok(mails.some((m) => /^New report from Acme · ACME-\d+/.test(m.subject) && m.to.includes('admin@test.com') && /No video bug/.test(m.text)), 'admin emailed')
+    assert.ok(mails.some((m) => /^We received your report · ACME-\d+/.test(m.subject) && m.to.includes('jane@acme.com')), 'client got a receipt')
   })
 
   it('cannot attach a video to a report that was already submitted', async () => {
@@ -536,16 +536,17 @@ describe('optional video, item types and the roadmap', () => {
     assert.equal(list.some((x) => x.id === created.data.report.id), false)
   })
 
-  it('gives each type its own id prefix, and sends features and questions (only) to the roadmap', async () => {
+  it('numbers items per project, and sends features and questions (only) to the roadmap', async () => {
     const feat = await jane.json('POST', '/api/reports', { title: 'Dark mode', kind: 'Feature request', withVideo: false })
     assert.equal(feat.data.report.kind, 'Feature request')
-    assert.match(feat.data.report.id, /^REQ-\d{4}$/)
+    assert.match(feat.data.report.id, /^ACME-\d+$/)
     const q = await jane.json('POST', '/api/reports', { title: 'How?', kind: 'Question', withVideo: false })
-    assert.match(q.data.report.id, /^Q-\d{4}$/)
+    assert.match(q.data.report.id, /^ACME-\d+$/)
     const uat = await jane.json('POST', '/api/reports', { title: 'Found', kind: 'UAT finding', withVideo: false })
-    assert.match(uat.data.report.id, /^UAT-\d{4}$/)
+    assert.match(uat.data.report.id, /^ACME-\d+$/)
     const nums = [feat, q, uat].map((x) => Number(x.data.report.id.split('-')[1]))
     assert.equal(new Set(nums).size, 3, 'numbers are unique across types')
+    assert.equal(nums[1], nums[0] + 1, 'and they count up one at a time')
     assert.equal((await jane.json('POST', '/api/reports', { title: 'x', kind: 'Rant', withVideo: false })).status, 400)
     const onBoard = ((await jane.json('GET', '/api/roadmap')).data.items as Json[])
     const has = (id: string) => onBoard.some((i) => (i.reportIds as string[]).includes(id))
@@ -1369,5 +1370,65 @@ describe('renaming a project', () => {
     assert.equal((await new Client().json('PATCH', `/api/admin/clients/${id}`, { name: 'Mine now' })).status, 401)
     assert.equal((await admin.json('PATCH', '/api/admin/clients/nope', { name: 'X' })).status, 404)
     assert.equal(other.length > 0, true)
+  })
+})
+
+describe('phase 0: replies that move the status, and per-project numbers', () => {
+  const adminC = new Client()
+  const janeC = new Client()
+  let project2 = ''
+  let acmeId = ''
+  let sam2: Client
+  before(async () => {
+    await adminC.signIn('admin@test.com')
+    await janeC.signIn('jane@acme.com')
+    acmeId = (await one<{ id: string }>("SELECT id FROM clients WHERE name = 'Acme'"))!.id
+  })
+
+  it('a reply can move the status in the same step, with one email and one history trail', async () => {
+    const made = await janeC.json('POST', '/api/reports', { title: 'Reply moves status', withVideo: false, clientId: acmeId })
+    const id = made.data.report.id
+    assert.equal(made.data.report.status, 'New')
+    const res = await adminC.json('POST', `/api/reports/${id}/replies`, { text: 'Which browser are you using?', status: 'Needs client input' })
+    assert.equal(res.status, 200)
+    assert.equal(res.data.report.status, 'Needs client input')
+    const kinds = res.data.report.history.map((h: Json) => h.kind)
+    assert.deepEqual(kinds.slice(-2), ['reply', 'status'])
+    const seen = (await janeC.json('GET', `/api/reports/${id}`)).data.report
+    assert.equal(seen.status, 'Needs client input')
+    const again = await adminC.json('POST', `/api/reports/${id}/replies`, { text: 'Thanks', status: 'Needs client input' })
+    assert.equal(again.data.report.history.filter((h: Json) => h.kind === 'status').length, 1, 'no duplicate status entry for an unchanged status')
+    assert.equal((await adminC.json('POST', `/api/reports/${id}/replies`, { text: 'x', status: 'Nonsense' })).status, 400)
+    assert.equal((await adminC.json('POST', `/api/reports/${id}/replies`, { text: 'plain reply' })).data.report.status, 'Needs client input', 'a reply without a status leaves it alone')
+  })
+
+  it('each project counts its own items', async () => {
+    const mk = await adminC.json('POST', '/api/admin/clients', { name: 'Globex Industries' })
+    project2 = mk.data.client.id
+    await adminC.json('POST', `/api/admin/clients/${project2}/users`, { email: 'sam2@globex.test', name: 'Sam Two' })
+    sam2 = new Client()
+    await sam2.signIn('sam2@globex.test')
+    const a = await sam2.json('POST', '/api/reports', { title: 'First here', withVideo: false })
+    const b = await sam2.json('POST', '/api/reports', { title: 'Second here', withVideo: false })
+    assert.equal(a.data.report.id, 'GI-1')
+    assert.equal(b.data.report.id, 'GI-2')
+    const acme = await janeC.json('POST', '/api/reports', { title: 'Acme next', withVideo: false, clientId: acmeId })
+    assert.match(acme.data.report.id, /^ACME-\d+$/)
+    assert.notEqual(acme.data.report.id.split('-')[1], '1', 'Acme keeps counting on its own')
+  })
+
+  it('numbers stay unique when many arrive at once', async () => {
+    const made = await Promise.all(Array.from({ length: 6 }, (_, i) => sam2.json('POST', '/api/reports', { title: `Parallel ${i}`, withVideo: false })))
+    const ids = made.map((m) => m.data.report.id)
+    assert.equal(new Set(ids).size, 6)
+    assert.ok(made.every((m) => m.status === 201))
+  })
+
+  it('codes are unique and never clash with the old prefixes', async () => {
+    const { makeClientCode } = await import('../db.js')
+    assert.equal(makeClientCode('Acme Corp', new Set()), 'AC')
+    assert.equal(makeClientCode('Acme Corp', new Set(['AC'])), 'AC2')
+    assert.equal(makeClientCode('Bug', new Set()), 'BUG2')
+    assert.equal(makeClientCode('!!', new Set()).length >= 2, true)
   })
 })

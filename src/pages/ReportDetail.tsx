@@ -5,7 +5,7 @@ import { addClientComment, approveReport, clientConfirm, reopenReport, updateDet
 import { moveItem, useRoadmap } from '../lib/roadmap'
 import { hasSeverity, ROADMAP_STATES, type RoadmapState } from '../lib/types'
 import { Conversation, History } from '../components/Activity'
-import { Block, Button, Field, fmtDateTime, KindTag, Modal, ModalSplit, Mono, SeverityBadge, StageBadge, StatusBadge, VideoEvidence } from '../components/ui'
+import { Block, Button, Field, fmtDateTime, KindTag, Modal, ModalSplit, Mono, SeverityBadge, StageBadge, ClientStatusBadge, VideoEvidence } from '../components/ui'
 
 /** A client's view of one item: a large dialog over their list, like a task view. */
 export function ReportDetail({ id, onClose }: { id: string; onClose: () => void }) {
@@ -121,7 +121,7 @@ export function ReportDetail({ id, onClose }: { id: string; onClose: () => void 
 
   const side = (
     <>
-      <p className="flex flex-wrap items-center gap-2"><StatusBadge status={report.status} /><KindTag kind={report.kind} />{hasSeverity(report.kind) && <SeverityBadge severity={report.severity} />}{card && <StageBadge stage={card.state} />}</p>
+      <p className="flex flex-wrap items-center gap-2"><ClientStatusBadge status={report.status} /><KindTag kind={report.kind} />{hasSeverity(report.kind) && <SeverityBadge severity={report.severity} />}{card && <StageBadge stage={card.state} />}</p>
 
       {verify && (
         <section aria-labelledby="verify-h" className="mt-5 rounded-card border border-[var(--seam-verify-fg)]/30 bg-[var(--seam-verify-bg)] p-4">

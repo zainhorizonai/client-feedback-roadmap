@@ -129,6 +129,9 @@ const SCHEMA = [
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS submitted_at TEXT',
   "ALTER TABLE reports ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'Bug'",
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS roadmap_stage TEXT',
+  // Report numbers are per project (ACME-12), so one client never sees how busy the others are.
+  'ALTER TABLE clients ADD COLUMN IF NOT EXISTS code TEXT',
+  'ALTER TABLE clients ADD COLUMN IF NOT EXISTS report_seq INTEGER NOT NULL DEFAULT 0',
   'UPDATE reports SET submitted_at = created_at WHERE submitted_at IS NULL AND video_path IS NOT NULL',
   'CREATE INDEX IF NOT EXISTS idx_reports_client ON reports(client_id)',
   'CREATE INDEX IF NOT EXISTS idx_history_report ON history(report_id)',
@@ -233,6 +236,29 @@ export async function backfillRoadmapForRequests(d: Q) {
   await d.query(`UPDATE reports SET roadmap_auto = 1 WHERE kind = ANY($1::text[]) AND roadmap_auto = 0 AND submitted_at IS NOT NULL`, [`{${ROADMAP_KINDS.map((k) => `"${k}"`).join(',')}}`])
 }
 
+const RESERVED_CODES = ['BUG', 'UAT', 'REQ', 'Q', 'RM']
+
+/** A short, readable project code: initials of several words, or the first letters of one. Unique among `taken`. */
+export function makeClientCode(name: string, taken: Set<string>): string {
+  const words = name.toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean)
+  let base = words.length > 1 ? words.map((w) => w[0]).join('').slice(0, 4) : (words[0] ?? 'PRJ').slice(0, 4)
+  if (base.length < 2) base = (words.join('') + 'PRJ').slice(0, 3)
+  let code = base
+  for (let n = 2; taken.has(code) || RESERVED_CODES.includes(code); n++) code = `${base.slice(0, 4)}${n}`
+  return code
+}
+
+/** Gives every project without a code one. Existing report ids are left exactly as they are. */
+export async function backfillClientCodes(d: Q) {
+  const rows = await d.query('SELECT id, name, code FROM clients ORDER BY created_at, id', [])
+  const taken = new Set(rows.filter((r) => r.code).map((r) => String(r.code)))
+  for (const r of rows.filter((x) => !x.code)) {
+    const code = makeClientCode(String(r.name), taken)
+    taken.add(code)
+    await d.query('UPDATE clients SET code = $1 WHERE id = $2 AND code IS NULL', [code, String(r.id)])
+  }
+}
+
 async function init(): Promise<Driver> {
   const d = await createDriver()
   try {
@@ -242,6 +268,7 @@ async function init(): Promise<Driver> {
     await d.batch(SCHEMA.map((s) => [s, []]))
   }
   try {
+    await backfillClientCodes(d)
     await migrateLegacyRoadmap(d)
     await backfillRoadmapForRequests(d)
   } catch (e) {

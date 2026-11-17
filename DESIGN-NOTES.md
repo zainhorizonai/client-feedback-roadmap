@@ -89,3 +89,12 @@ switched on under Columns. A "project" in the interface is a client organisation
 | Console and network capture, session replay | Out of scope in the handoff. |
 
 The handoff notes that it does not establish that the name SEAM is available. Check that before using it publicly.
+
+## Phase 0: friction fixes
+
+- A reply can move the status in the same step ("Then set status to"). A question defaults to Needs client input, so the client sees it in Waiting for you.
+- The Inbox shows how many new reports are waiting, and its rows open the ticket on click.
+- Clients no longer pick a severity. They tick "This is stopping us from working" (High); the team sets the real severity when triaging.
+- Clients see plain status words: Received, Reviewing, In progress, Needs you, Ready to verify, Done. The team keeps the finer statuses.
+- After sending, the new item opens over the list.
+- Items are numbered per project (ACME-1, ACME-2). Existing items keep their old ids (BUG-0001 and so on).

@@ -59,7 +59,11 @@ export function AdminInbox() {
       ) : (
         <ul className="space-y-3">
           {queue.map((r) => (
-            <li key={r.id} className="rounded-card border border-line bg-surface p-4">
+            <li
+              key={r.id}
+              className="cursor-pointer rounded-card border border-line bg-surface p-4 hover:border-control"
+              onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button, a, input, textarea, label')) setParams({ report: r.id }, { replace: true }) }}
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
@@ -80,7 +84,6 @@ export function AdminInbox() {
                   )}
                   <Button onClick={() => triage(r, 'Triaging')} pending={busy === r.id + 'Triaging'}><SearchIcon className="h-4 w-4" aria-hidden="true" />Start triage</Button>
                   <Button variant="secondary" onClick={() => triage(r, 'Needs client input')} pending={busy === r.id + 'Needs client input'}><MessageCircleQuestion className="h-4 w-4" aria-hidden="true" />Ask for input</Button>
-                  <Button variant="tertiary" onClick={() => setParams({ report: r.id }, { replace: true })}>Open</Button>
                 </div>
               </div>
             </li>

@@ -108,8 +108,9 @@ export function setStatus(id: string, status: Status) {
   return act(() => api.patch(`/api/reports/${id}`, { status }), status === 'New' || status === 'Triaging' ? `Status set to ${status}.` : `Status set to ${status}. The client has been emailed.`)
 }
 
-export const addReply = (id: string, text: string) =>
-  act(() => api.post(`/api/reports/${id}/replies`, { text }), 'Reply sent. The client has been emailed.')
+/** A reply can move the status in the same step, so the client sees the change and gets one email. */
+export const addReply = (id: string, text: string, status?: Status) =>
+  act(() => api.post(`/api/reports/${id}/replies`, { text, status }), 'Reply sent. The client has been emailed.')
 
 export const addClientComment = (id: string, text: string) =>
   act(() => api.post(`/api/reports/${id}/comments`, { text }), 'Comment sent.')
