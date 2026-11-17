@@ -1432,3 +1432,103 @@ describe('phase 0: replies that move the status, and per-project numbers', () =>
     assert.equal(makeClientCode('!!', new Set()).length >= 2, true)
   })
 })
+
+describe('phase 1: owners, bulk changes, reminders and daily summaries', () => {
+  const adminC = new Client()
+  const pat = new Client()
+  const mails: Json[] = []
+  let adminId = ''
+  let projectId = ''
+  const mk = async (title: string) => (await pat.json('POST', '/api/reports', { title, withVideo: false })).data.report.id as string
+  before(async () => {
+    await adminC.signIn('admin@test.com')
+    adminId = (await one<{ id: string }>("SELECT id FROM users WHERE email = 'admin@test.com'"))!.id
+    projectId = (await adminC.json('POST', '/api/admin/clients', { name: 'Initech' })).data.client.id
+    await adminC.json('POST', `/api/admin/clients/${projectId}/users`, { email: 'pat@initech.test', name: 'Pat Lumbergh' })
+    await pat.signIn('pat@initech.test')
+    // Only now capture mail: signing in a first time needs the local dev link, which console mode provides.
+    const { config } = await import('../config.js')
+    const { setMailTransportForTests } = await import('../email.js')
+    config.emailProvider = 'smtp'
+    config.smtpUser = 'sender@gmail.com'
+    setMailTransportForTests({ sendMail: async (m) => { mails.push(m); return {} } })
+  })
+
+  it('lists the team, and clients cannot', async () => {
+    const t = await adminC.json('GET', '/api/admin/team')
+    assert.ok((t.data.team as Json[]).some((x) => x.id === adminId))
+    assert.equal((await pat.json('GET', '/api/admin/team')).status, 403)
+  })
+
+  it('assigns and unassigns a report, with history, and clients never see the owner', async () => {
+    const id = await mk('Owner test')
+    const set = await adminC.json('PATCH', `/api/reports/${id}`, { assigneeId: adminId })
+    assert.equal(set.data.report.assignee.id, adminId)
+    assert.ok((set.data.report.history as Json[]).some((h) => /^Assigned to /.test(h.text)))
+    assert.equal('assignee' in (await pat.json('GET', `/api/reports/${id}`)).data.report, false)
+    const same = await adminC.json('PATCH', `/api/reports/${id}`, { assigneeId: adminId })
+    assert.equal((same.data.report.history as Json[]).filter((h) => /^Assigned to /.test(h.text)).length, 1, 'no repeat entry')
+    assert.equal((await adminC.json('PATCH', `/api/reports/${id}`, { assigneeId: 'nobody' })).status, 400)
+    assert.equal((await adminC.json('PATCH', `/api/reports/${id}`, { assigneeId: '' })).data.report.assignee, null)
+  })
+
+  it('changes several reports at once and emails the client about status changes', async () => {
+    const a = await mk('Bulk A'); const b = await mk('Bulk B')
+    mails.length = 0
+    const res = await adminC.json('POST', '/api/admin/reports/bulk', { ids: [a, b], status: 'In progress', severity: 'High', assigneeId: adminId })
+    assert.equal(res.status, 200)
+    assert.equal(res.data.updated, 2)
+    for (const id of [a, b]) {
+      const r = (await adminC.json('GET', `/api/reports/${id}`)).data.report
+      assert.equal(r.status, 'In progress'); assert.equal(r.severity, 'High'); assert.equal(r.assignee.id, adminId)
+    }
+    assert.equal(mails.filter((m) => /is In progress/.test(m.subject) && m.to.includes('pat@initech.test')).length, 2)
+    assert.equal((await adminC.json('POST', '/api/admin/reports/bulk', { ids: [a], status: 'In progress' })).data.updated, 0, 'nothing to change')
+    assert.equal((await adminC.json('POST', '/api/admin/reports/bulk', { ids: [], status: 'Resolved' })).status, 400)
+    assert.equal((await adminC.json('POST', '/api/admin/reports/bulk', { ids: [a] })).status, 400)
+    assert.equal((await adminC.json('POST', '/api/admin/reports/bulk', { ids: ['x"; DROP'], status: 'Resolved' })).status, 400)
+    assert.equal((await adminC.json('POST', '/api/admin/reports/bulk', { ids: Array.from({ length: 101 }, (_, i) => `INI-${i}`), status: 'Resolved' })).status, 400)
+    assert.equal((await pat.json('POST', '/api/admin/reports/bulk', { ids: [a], status: 'Resolved' })).status, 403)
+    assert.equal((await adminC.json('POST', '/api/admin/reports/bulk', { ids: [a, b], assigneeId: '' })).data.updated, 2, 'unassign')
+  })
+
+  it('holds emails for the daily summary when someone chooses it, then sends one', async () => {
+    const id = await mk('Digest test')
+    assert.equal((await pat.json('PATCH', '/api/me/notifications', { mode: 'sideways' })).status, 400)
+    assert.equal((await pat.json('PATCH', '/api/me/notifications', { mode: 'digest' })).status, 200)
+    assert.equal((await pat.json('GET', '/api/me')).data.user.notify, 'digest')
+    mails.length = 0
+    await adminC.json('POST', `/api/reports/${id}/replies`, { text: 'Quick question', status: 'Needs client input' })
+    await adminC.json('PATCH', `/api/reports/${id}`, { status: 'Ready to verify' })
+    assert.equal(mails.filter((m) => m.to.includes('pat@initech.test')).length, 0, 'nothing sent right away')
+    const { housekeeping } = await import('../app.js')
+    await housekeeping()
+    const digest = mails.filter((m) => m.to.includes('pat@initech.test') && /^Your SEAM summary: 2 updates/.test(m.subject))
+    assert.equal(digest.length, 1, 'one summary')
+    assert.match(digest[0].text, /Quick question/)
+    mails.length = 0
+    await housekeeping()
+    assert.equal(mails.filter((m) => m.to.includes('pat@initech.test')).length, 0, 'sent only once')
+    await pat.json('PATCH', '/api/me/notifications', { mode: 'instant' })
+    await adminC.json('PATCH', `/api/reports/${id}`, { status: 'Resolved' })
+    assert.equal(mails.filter((m) => m.to.includes('pat@initech.test') && /is Resolved/.test(m.subject)).length, 1, 'instant again')
+  })
+
+  it('reminds a client after three quiet days, at most three times, and never for finished work', async () => {
+    const { sendReminders } = await import('../app.js')
+    const id = await mk('Reminder test')
+    await adminC.json('POST', `/api/reports/${id}/replies`, { text: 'Which page?', status: 'Needs client input' })
+    mails.length = 0
+    assert.equal(await sendReminders(), 0, 'too soon')
+    for (let n = 1; n <= 4; n++) {
+      await run("UPDATE history SET at = $1 WHERE report_id = $2", new Date(Date.now() - 4 * 864e5).toISOString(), id)
+      const sent = await sendReminders()
+      assert.equal(sent, n <= 3 ? 1 : 0, `reminder ${n}`)
+    }
+    assert.equal(mails.filter((m) => /^Reminder: /.test(m.subject) && m.to.includes('pat@initech.test')).length, 3)
+    const done = await mk('Reminder done')
+    await adminC.json('PATCH', `/api/reports/${done}`, { status: 'Resolved' })
+    await run("UPDATE history SET at = $1 WHERE report_id = $2", new Date(Date.now() - 9 * 864e5).toISOString(), done)
+    assert.equal(await sendReminders(), 0)
+  })
+})

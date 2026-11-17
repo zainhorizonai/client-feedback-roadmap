@@ -1,10 +1,12 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Bug, ClipboardCheck, HelpCircle, Lightbulb, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useClientProject } from '../lib/clientProject'
 import { ApiError } from '../lib/api'
-import { createReport } from '../lib/store'
+import { createReport, useReports } from '../lib/store'
+import { similarTo } from '../lib/similar'
+import { clearDraft, clearDraftVideo, loadDraft, loadDraftVideo, saveDraft, saveDraftVideo } from '../lib/draft'
 import { hasSeverity, type Kind } from '../lib/types'
 import { Recorder } from '../components/Recorder'
 import { Button, Field } from '../components/ui'
@@ -26,23 +28,47 @@ const COPY: Record<Kind, { title: string; placeholder: string; detail: string; v
 
 export function NewReport() {
   const nav = useNavigate()
-  const { maxVideoMb } = useAuth()
+  const { maxVideoMb, user } = useAuth()
+  const userId = user?.id ?? ''
+  const reports = useReports()
+  // What they had typed last time, if they left before sending. Read once.
+  const saved = useRef(loadDraft(userId)).current
+  const [restored, setRestored] = useState(!!saved)
+  const [retry, setRetry] = useState(0)
   const { projects, selectedId } = useClientProject()
-  const [projectId, setProjectId] = useState(selectedId)
+  const [projectId, setProjectId] = useState(saved && projects.some((p) => p.id === saved.projectId) ? saved.projectId : selectedId)
   const [params] = useSearchParams()
-  const [kind, setKind] = useState<Kind>(OPTIONS.find((o) => o.param === params.get('type'))?.kind ?? 'Bug')
+  const [kind, setKind] = useState<Kind>(OPTIONS.find((o) => o.param === params.get('type'))?.kind ?? (saved?.kind as Kind | undefined) ?? 'Bug')
   const [video, setVideo] = useState<Blob | null>(null)
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [pageUrl, setPageUrl] = useState('')
+  const [title, setTitle] = useState(saved?.title ?? '')
+  const [description, setDescription] = useState(saved?.description ?? '')
+  const [pageUrl, setPageUrl] = useState(saved?.pageUrl ?? '')
   // Clients say whether this is stopping their work. The team sets the real severity when they triage.
-  const [blocking, setBlocking] = useState(false)
+  const [blocking, setBlocking] = useState(saved?.blocking ?? false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(0)
   const [titleError, setTitleError] = useState('')
   const [error, setError] = useState('')
   const titleRef = useRef<HTMLInputElement>(null)
   const copy = COPY[kind]
+
+  // Keep what they type, and the video, so a refresh or a closed tab loses nothing.
+  useEffect(() => {
+    const t = setTimeout(() => saveDraft(userId, { kind, projectId, title, description, pageUrl, blocking }), 400)
+    return () => clearTimeout(t)
+  }, [userId, kind, projectId, title, description, pageUrl, blocking])
+  useEffect(() => { if (saved) loadDraftVideo(userId).then((b) => b && setVideo((v) => v ?? b)) }, [userId, saved])
+  const firstVideo = useRef(true)
+  useEffect(() => {
+    if (firstVideo.current) { firstVideo.current = false; if (!video) return }
+    if (video) saveDraftVideo(userId, video); else clearDraftVideo(userId)
+  }, [userId, video])
+  function startFresh() {
+    clearDraft(userId); clearDraftVideo(userId)
+    setTitle(''); setDescription(''); setPageUrl(''); setBlocking(false); setVideo(null); setRestored(false)
+  }
+  // A gentle hint when something very like this is already open. It never stops them sending.
+  const similar = title.trim().length >= 8 ? similarTo(title, reports, projectId) : []
   // Ideas and questions go on the client's roadmap. Bugs and UAT findings go to the fix list.
   const onRoadmap = kind === 'Feature request' || kind === 'Question'
 
@@ -56,9 +82,11 @@ export function NewReport() {
     }
     setBusy(true)
     setProgress(0)
+    setRetry(0)
     setError('')
     try {
-      const r = await createReport({ clientId: projectId, title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) && blocking ? 'High' : 'Medium', kind }, video, setProgress)
+      const r = await createReport({ clientId: projectId, title: title.trim(), description: description.trim(), pageUrl: pageUrl.trim(), severity: hasSeverity(kind) && blocking ? 'High' : 'Medium', kind }, video, setProgress, setRetry)
+      clearDraft(userId); clearDraftVideo(userId)
       // Straight to the item, over the list, so they can see it and add to it.
       notify(onRoadmap ? `Added to your roadmap as ${r.id}.` : `Sent as ${r.id}. We will update you here and by email.`)
       nav(`/reports/${r.id}`)
@@ -83,6 +111,13 @@ export function NewReport() {
     <div className="mx-auto max-w-2xl">
       <Link to="/reports" className="mb-4 inline-flex min-h-9 items-center gap-1 text-muted"><ArrowLeft className="h-4 w-4" aria-hidden="true" />My items</Link>
       <h1 className="font-semibold">{copy.title}</h1>
+
+      {restored && (
+        <div role="status" className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-surface p-3">
+          <p>We kept your unfinished {saved?.kind ? saved.kind.toLowerCase() : 'report'} from last time.</p>
+          <Button variant="tertiary" onClick={startFresh}>Start fresh</Button>
+        </div>
+      )}
 
       <form onSubmit={submit} noValidate className="mt-6 space-y-8">
         <fieldset>
@@ -116,6 +151,15 @@ export function NewReport() {
           <Field label="Title" required error={titleError}>
             <input ref={titleRef} className="input" maxLength={120} value={title} aria-invalid={!!titleError} placeholder={copy.placeholder} onChange={(e) => { setTitle(e.target.value); if (titleError) setTitleError('') }} />
           </Field>
+          {similar.length > 0 && (
+            <div role="status" className="rounded-card border border-[var(--seam-warning-fg)]/30 bg-[var(--seam-warning-bg)] p-3">
+              <p className="font-semibold text-[var(--seam-warning-fg)]">Something like this is already open</p>
+              <p className="text-sm">You can add to it instead of sending a new one. Your draft stays here.</p>
+              <ul className="mt-2 space-y-1">
+                {similar.map((r) => <li key={r.id}><Link to={`/reports/${r.id}`} className="font-semibold"><span className="font-mono text-sm">{r.id}</span> {r.title}</Link></li>)}
+              </ul>
+            </div>
+          )}
           <Field label={copy.detail}>
             <textarea className="input" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} />
           </Field>
@@ -137,6 +181,7 @@ export function NewReport() {
             <div className="h-full bg-action transition-all" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
         )}
+        {busy && retry > 0 && <p role="status" className="text-sm text-muted">Your connection dropped. Trying again ({retry} of 3)…</p>}
         {error && (
           <div role="alert" className="rounded-card bg-[var(--seam-error-bg)] p-3 text-[var(--seam-error-fg)]">
             <p className="font-semibold">It did not send</p>

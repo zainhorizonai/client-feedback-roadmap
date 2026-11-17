@@ -16,6 +16,8 @@ export interface AuthUser {
   clientName: string | null
   /** Every project this person belongs to. Empty for admins, who can see them all. */
   projects: { id: string; name: string }[]
+  /** How this person wants email: right away, or one summary a day. */
+  notify: 'instant' | 'digest'
 }
 
 const COOKIE = 'sid'
@@ -209,8 +211,8 @@ const notifyPasswordChanged = (u: { email: string; name: string }) =>
 // ---------- sessions ----------
 
 async function loadUserBySession(sid: string): Promise<AuthUser | null> {
-  const u = await one<{ id: string; email: string; name: string; role: 'admin' | 'client'; projects: unknown }>(
-    `SELECT u.id, u.email, u.name, u.role,
+  const u = await one<{ id: string; email: string; name: string; role: 'admin' | 'client'; notify_mode: string; projects: unknown }>(
+    `SELECT u.id, u.email, u.name, u.role, u.notify_mode,
             COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name) ORDER BY c.name)
                         FROM memberships m JOIN clients c ON c.id = m.client_id WHERE m.user_id = u.id), '[]'::json) AS projects
        FROM sessions s JOIN users u ON u.id = s.user_id
@@ -221,7 +223,7 @@ async function loadUserBySession(sid: string): Promise<AuthUser | null> {
   // Some drivers hand back json already parsed, others as text.
   const raw = typeof u.projects === 'string' ? JSON.parse(u.projects) : u.projects
   const projects = (Array.isArray(raw) ? raw : []) as { id: string; name: string }[]
-  return { id: u.id, email: u.email, name: u.name, role: u.role, clientId: projects[0]?.id ?? null, clientName: projects[0]?.name ?? null, projects }
+  return { id: u.id, email: u.email, name: u.name, role: u.role, clientId: projects[0]?.id ?? null, clientName: projects[0]?.name ?? null, projects, notify: u.notify_mode === 'digest' ? 'digest' : 'instant' }
 }
 
 export const withUser: MiddlewareHandler<{ Variables: { user: AuthUser | null } }> = async (c, next) => {

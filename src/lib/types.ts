@@ -30,6 +30,8 @@ export interface User {
   clientName: string | null
   /** Every project this person belongs to. A client can be invited into several. */
   projects: { id: string; name: string }[]
+  /** How this person wants email: as things happen, or one summary a day. */
+  notify: 'instant' | 'digest'
 }
 
 /** A client organisation. In the product it is called a project. */
@@ -69,6 +71,8 @@ export interface Report {
   notes?: string
   /** Roadmap work this report is linked to. Admin only. */
   roadmapItems?: { id: string; title: string; state: RoadmapState }[]
+  /** Who on the team owns it. Admin only. */
+  assignee?: { id: string; name: string } | null
   resolutionUrl: string
   hasVideo: boolean
   resolvedAt?: string

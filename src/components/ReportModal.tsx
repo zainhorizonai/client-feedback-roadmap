@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link2, Lock, Send } from 'lucide-react'
-import { addReply, setStatus, updateFields } from '../lib/store'
+import { useSearchParams } from 'react-router-dom'
+import { useAuth } from '../lib/auth'
+import { addReply, assign, setStatus, updateFields, useReports } from '../lib/store'
+import { useTeam } from '../lib/team'
+import { similarTo } from '../lib/similar'
 import { updateItem, useRoadmap } from '../lib/roadmap'
 import { hasSeverity, KINDS, SEVERITIES, STATUSES, type Kind, type Report, type Severity, type Status } from '../lib/types'
 import { Conversation, History } from './Activity'
@@ -22,6 +26,11 @@ export function ReportModal({ report, onClose }: { report: Report; onClose: () =
 
 function ReportBody({ report }: { report: Report }) {
   const items = useRoadmap()
+  const { user } = useAuth()
+  const team = useTeam()
+  const all = useReports()
+  const [, setParams] = useSearchParams()
+  const duplicates = similarTo(report.title, all, report.clientId, report.id)
   const [reply, setReply] = useState('')
   // After sending, the status can move too. Left alone it follows the reply: a question waits for the client.
   const [chosen, setChosen] = useState<Status | null>(null)
@@ -96,6 +105,13 @@ function ReportBody({ report }: { report: Report }) {
             {STATUSES.map((s) => <option key={s}>{s}</option>)}
           </select>
         </Field>
+        <Field label="Assigned to">
+          <select className="input" value={report.assignee?.id ?? ''} onChange={(e) => assign(report.id, e.target.value, team.find((t) => t.id === e.target.value)?.name ?? '')}>
+            <option value="">Unassigned</option>
+            {team.map((t) => <option key={t.id} value={t.id}>{t.name}{t.id === user?.id ? ' (you)' : ''}</option>)}
+          </select>
+        </Field>
+        {user && report.assignee?.id !== user.id && <Button variant="tertiary" className="!min-h-9 !px-0" onClick={() => assign(report.id, user.id, user.name)}>Assign to me</Button>}
         <Field label="Type">
           <select className="input" value={report.kind} onChange={(e) => updateFields(report.id, { kind: e.target.value as Kind })}>
             {KINDS.map((k) => <option key={k}>{k}</option>)}
@@ -110,6 +126,16 @@ function ReportBody({ report }: { report: Report }) {
         )}
       </div>
       <p className="mt-3 flex flex-wrap items-center gap-2"><StatusBadge status={report.status} />{hasSeverity(report.kind) && <SeverityBadge severity={report.severity} />}<KindTag kind={report.kind} /></p>
+
+      {duplicates.length > 0 && (
+        <Block title="Possible duplicates" hint="Open items in this project with a similar title.">
+          <ul className="space-y-1.5">
+            {duplicates.map((d) => (
+              <li key={d.id}><button type="button" onClick={() => setParams({ report: d.id }, { replace: true })} className="flex w-full items-center justify-between gap-2 rounded-control border border-line bg-surface px-3 py-2 text-left hover:bg-canvas"><span className="min-w-0 truncate"><Mono className="text-sm text-muted">{d.id}</Mono> {d.title}</span><span className="shrink-0 text-sm text-muted">{d.status}</span></button></li>
+            ))}
+          </ul>
+        </Block>
+      )}
 
       <Block title="Related roadmap work">
         {linked.length === 0 ? <p className="text-muted">Not linked to any roadmap item.</p> : (

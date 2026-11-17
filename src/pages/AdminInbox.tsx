@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CheckCheck, MessageCircleQuestion, Search as SearchIcon } from 'lucide-react'
 import { useProject } from '../lib/project'
-import { setStatus, updateFields, useReports, useReportsLoaded } from '../lib/store'
+import { startTriage, updateFields, useReports, useReportsLoaded } from '../lib/store'
+import { useAuth } from '../lib/auth'
+import { waitingText } from '../lib/waiting'
 import { hasSeverity, SEVERITIES, type Report, type Severity } from '../lib/types'
 import { ReportModal } from '../components/ReportModal'
 import { Button, EmptyState, fmtDateTime, KindTag, Mono, PageHeader, SeverityBadge, Skeleton } from '../components/ui'
@@ -13,6 +15,7 @@ const RANK: Record<Severity, number> = { Blocker: 0, High: 1, Medium: 2, Low: 3 
 /** The triage queue: new submissions waiting for a first decision. It shows the same records as the Tracker. */
 export function AdminInbox() {
   const { matches, label, selectedIds } = useProject()
+  const { user } = useAuth()
   const reports = useReports()
   const loaded = useReportsLoaded()
   const [params, setParams] = useSearchParams()
@@ -30,7 +33,8 @@ export function AdminInbox() {
 
   async function triage(r: Report, status: 'Triaging' | 'Needs client input') {
     setBusy(r.id + status)
-    await setStatus(r.id, status)
+    // Starting triage also takes the report, unless someone already owns it.
+    await startTriage(r.id, status, { id: user!.id, name: user!.name }, !!r.assignee || status !== 'Triaging')
     setBusy(null)
   }
 
@@ -68,10 +72,11 @@ export function AdminInbox() {
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
                     <Mono>{r.id}</Mono><span aria-hidden="true">·</span><span>{r.clientName}</span><span aria-hidden="true">·</span><span>{r.reporterName}</span><span aria-hidden="true">·</span><Mono>{fmtDateTime(r.createdAt)}</Mono>
+                    {waitingText(r) && <span className="badge badge-warning">{waitingText(r)}</span>}
                   </p>
                   <button type="button" onClick={() => setParams({ report: r.id }, { replace: true })} className="mt-1 text-left font-semibold hover:underline">{r.title}</button>
                   {r.description && <p className="mt-1 line-clamp-2 break-words text-muted">{r.description}</p>}
-                  <p className="mt-2 flex flex-wrap items-center gap-2"><KindTag kind={r.kind} />{hasSeverity(r.kind) && <SeverityBadge severity={r.severity} />}{r.hasVideo && <span className="text-sm text-muted">Has video</span>}</p>
+                  <p className="mt-2 flex flex-wrap items-center gap-2"><KindTag kind={r.kind} />{hasSeverity(r.kind) && <SeverityBadge severity={r.severity} />}{r.hasVideo && <span className="text-sm text-muted">Has video</span>}{r.assignee && <span className="text-sm text-muted">Assigned to {r.assignee.id === user?.id ? 'you' : r.assignee.name}</span>}</p>
                 </div>
                 <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
                   {hasSeverity(r.kind) && (

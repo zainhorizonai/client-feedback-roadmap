@@ -75,14 +75,14 @@ export interface NewReportInput {
 }
 
 /** The video is optional. Without one the report is complete as soon as it is created. */
-export async function createReport(input: NewReportInput, video: Blob | null, onProgress: (f: number) => void): Promise<Report> {
+export async function createReport(input: NewReportInput, video: Blob | null, onProgress: (f: number) => void, onRetry?: (attempt: number) => void): Promise<Report> {
   const { report, upload } = await api.post<{ report: Report; upload?: { mode: UploadMode; flow?: UploadFlow } }>('/api/reports', { ...input, withVideo: !!video })
   if (!video || !upload) {
     upsert(report)
     return report
   }
   try {
-    const done = await uploadVideo(report.id, video, upload.mode, upload.flow, onProgress)
+    const done = await uploadVideo(report.id, video, upload.mode, upload.flow, onProgress, onRetry)
     upsert(done)
     return done
   } catch (e) {
@@ -92,6 +92,31 @@ export async function createReport(input: NewReportInput, video: Blob | null, on
 }
 
 type Editable = Partial<Pick<Report, 'title' | 'description' | 'pageUrl' | 'severity' | 'notes' | 'resolutionUrl' | 'kind'>>
+
+/** Gives a report to someone on the team, or to nobody (empty id). */
+export function assign(id: string, assigneeId: string, name: string) {
+  optimistic(id, { assignee: assigneeId ? { id: assigneeId, name } : null })
+  return act(() => api.patch(`/api/reports/${id}`, { assigneeId }), assigneeId ? `Assigned to ${name}.` : 'Unassigned.')
+}
+
+/** Triage in one step: set the status and take ownership. */
+export function startTriage(id: string, status: Status, me: { id: string; name: string }, keepOwner: boolean) {
+  optimistic(id, { status, ...(keepOwner ? {} : { assignee: me }) })
+  return act(() => api.patch(`/api/reports/${id}`, { status, ...(keepOwner ? {} : { assigneeId: me.id }) }), `Status set to ${status}.`)
+}
+
+/** Changes several reports at once. Empty fields are left alone. */
+export async function bulkUpdate(ids: string[], changes: { status?: Status; severity?: Severity; assigneeId?: string }): Promise<boolean> {
+  try {
+    const { updated } = await api.post<{ updated: number }>('/api/admin/reports/bulk', { ids, ...changes })
+    notify(updated === 0 ? 'Nothing needed changing.' : `Updated ${updated} ${updated === 1 ? 'report' : 'reports'}.`)
+    await refreshReports()
+    return true
+  } catch (e) {
+    notify(message(e), 'error')
+    return false
+  }
+}
 
 function optimistic(id: string, patch: Partial<Report>) {
   set({ ...state, reports: state.reports.map((r) => (r.id === id ? { ...r, ...patch } : r)) })

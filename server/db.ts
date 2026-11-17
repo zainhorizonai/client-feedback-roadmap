@@ -130,6 +130,19 @@ const SCHEMA = [
   "ALTER TABLE reports ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'Bug'",
   'ALTER TABLE reports ADD COLUMN IF NOT EXISTS roadmap_stage TEXT',
   // Report numbers are per project (ACME-12), so one client never sees how busy the others are.
+  // Phase 1: who owns an item, how each person wants to be emailed, and a queue for the once-a-day summary.
+  'ALTER TABLE reports ADD COLUMN IF NOT EXISTS assignee_id TEXT',
+  "ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_mode TEXT NOT NULL DEFAULT 'instant'",
+  `CREATE TABLE IF NOT EXISTS notification_queue (
+    id SERIAL PRIMARY KEY,
+    email TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    line TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    sent_at TEXT
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_queue_pending ON notification_queue(email) WHERE sent_at IS NULL',
   'ALTER TABLE clients ADD COLUMN IF NOT EXISTS code TEXT',
   'ALTER TABLE clients ADD COLUMN IF NOT EXISTS report_seq INTEGER NOT NULL DEFAULT 0',
   'UPDATE reports SET submitted_at = created_at WHERE submitted_at IS NULL AND video_path IS NOT NULL',

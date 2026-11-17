@@ -88,12 +88,13 @@ interface ReportRow {
   title: string; description: string; page_url: string; severity: string; status: Status
   notes: string; resolution_url: string; video_path: string | null; video_mime: string | null; resolved_at: string | null
   kind: Kind; roadmap_stage: string | null; roadmap_auto: number; submitted_at: string | null; reporter_role: 'admin' | 'client'
+  assignee_id: string | null; assignee_name: string | null
 }
 interface HistoryRow { report_id: string; at: string; by: string; kind: string; text: string; from_value: string | null; to_value: string | null }
 interface LinkedItem { id: string; title: string; state: string }
 
-const REPORT_SELECT = `SELECT r.*, c.name AS client_name, u.name AS reporter_name, u.email AS reporter_email, u.role AS reporter_role
-  FROM reports r JOIN clients c ON c.id = r.client_id JOIN users u ON u.id = r.reporter_id`
+const REPORT_SELECT = `SELECT r.*, c.name AS client_name, u.name AS reporter_name, u.email AS reporter_email, u.role AS reporter_role, a.name AS assignee_name
+  FROM reports r JOIN clients c ON c.id = r.client_id JOIN users u ON u.id = r.reporter_id LEFT JOIN users a ON a.id = r.assignee_id`
 
 function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[], items: LinkedItem[] = []) {
   return {
@@ -110,7 +111,7 @@ function serialize(r: ReportRow, user: AuthUser, history: HistoryRow[], items: L
     status: r.status,
     kind: r.kind,
     // Internal notes and roadmap links never leave the server for clients.
-    ...(user.role === 'admin' ? { notes: r.notes, roadmapItems: items } : {}),
+    ...(user.role === 'admin' ? { notes: r.notes, roadmapItems: items, assignee: r.assignee_id ? { id: r.assignee_id, name: r.assignee_name ?? '' } : null } : {}),
     resolutionUrl: r.resolution_url,
     hasVideo: !!r.video_path,
     resolvedAt: r.resolved_at ?? undefined,
@@ -168,13 +169,34 @@ async function adminEmails(): Promise<string[]> {
 const adminLink = (id: string) => `${config.appUrl}/admin/tracker?report=${id}`
 const clientLink = (id: string) => `${config.appUrl}/reports/${id}`
 
+/** A Postgres array literal for a list of text values, with quotes and backslashes escaped. */
+const pgArray = (list: string[]) => `{${list.map((v) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')}}`
+
+/**
+ * Sends a notification, or holds it for the once-a-day summary for people who chose that. Sign-in and password
+ * emails never come through here: they always go straight away.
+ */
+async function deliver(to: string[], subject: string, lines: string[], url: string, label: string, greeting = '') {
+  const recipients = [...new Set(to)]
+  if (recipients.length === 0) return
+  const prefs = await all<{ email: string; notify_mode: string }>('SELECT email, notify_mode FROM users WHERE email = ANY($1::text[])', pgArray(recipients))
+  const later = new Set(prefs.filter((p) => p.notify_mode === 'digest').map((p) => p.email))
+  const now_ = recipients.filter((e) => !later.has(e))
+  if (now_.length) {
+    await sendQuietly({
+      to: now_,
+      subject,
+      text: `${greeting}${lines.join('\n')}\n\n${url}`,
+      html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label, url }),
+    })
+  }
+  for (const email of later) {
+    await run('INSERT INTO notification_queue (email, subject, line, url, created_at) VALUES ($1, $2, $3, $4, $5)', email, subject, lines.join(' ').slice(0, 400), url, now())
+  }
+}
+
 async function mailAdmins(subject: string, lines: string[], id: string, url = adminLink(id), label = 'Open report') {
-  await sendQuietly({
-    to: await adminEmails(),
-    subject,
-    text: `${lines.join('\n')}\n\n${url}`,
-    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label, url }),
-  })
+  await deliver(await adminEmails(), subject, lines, url, label)
 }
 /** Whoever sent the item gets the email. Items added by the team go to everyone at that client. */
 async function clientRecipients(r: ReportRow): Promise<string[]> {
@@ -182,12 +204,7 @@ async function clientRecipients(r: ReportRow): Promise<string[]> {
   return (await all<{ email: string }>("SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.client_id = $1 AND u.role = 'client'", r.client_id)).map((u) => u.email)
 }
 const mailClient = async (r: ReportRow, subject: string, lines: string[]) =>
-  sendQuietly({
-    to: await clientRecipients(r),
-    subject,
-    text: `Hello,\n\n${lines.join('\n')}\n\n${clientLink(r.id)}`,
-    html: layout(subject, lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''), { label: 'View report', url: clientLink(r.id) }),
-  })
+  deliver(await clientRecipients(r), subject, lines, clientLink(r.id), 'View report', 'Hello,\n\n')
 
 /** What each status email says. A status with no entry (New, Triaging) sends nothing. */
 const STATUS_EMAIL: Partial<Record<Status, (r: ReportRow) => string[]>> = {
@@ -582,6 +599,20 @@ app.patch('/api/reports/:id', async (c) => {
   if ('notes' in body) set('notes', text(body.notes, 'notes', 4000))
   if ('resolutionUrl' in body) set('resolution_url', httpUrlOrEmpty(body.resolutionUrl, 'resolutionUrl'))
 
+  // Who owns it. Empty means nobody. The new owner is told, unless they assigned it to themselves.
+  let newAssignee: { id: string; name: string; email: string } | null | undefined
+  if ('assigneeId' in body) {
+    const wanted = text(body.assigneeId, 'assigneeId', 100)
+    if (wanted === (r.assignee_id ?? '')) newAssignee = undefined
+    else if (!wanted) { newAssignee = null; set('assignee_id', null) }
+    else {
+      const who = await one<{ id: string; name: string; email: string }>("SELECT id, name, email FROM users WHERE id = $1 AND role = 'admin' AND removed_at IS NULL", wanted)
+      if (!who) throw new HttpError(400, 'That person is not on the team')
+      newAssignee = who
+      set('assignee_id', who.id)
+    }
+  }
+
   let newStatus: Status | null = null
   if ('status' in body) {
     newStatus = oneOf(body.status, STATUSES, 'status')
@@ -599,12 +630,14 @@ app.patch('/api/reports/:id', async (c) => {
       stmts.push(historyStmt(r.id, 'admin', 'status', `Status changed from ${r.status} to ${newStatus}`, r.status, newStatus))
       if (newStatus === 'Resolved') stmts.push(historyStmt(r.id, 'admin', 'outcome', 'Closed by admin'))
     }
+    if (newAssignee !== undefined) stmts.push(historyStmt(r.id, 'admin', 'edit', newAssignee ? `Assigned to ${newAssignee.name}` : 'Unassigned'))
     if (stmts.length > 1) await batch(stmts)
     else await run(update[0], ...update[1])
   }
   // Triaging is internal. Every other change the client should know about is emailed once.
   const say = newStatus && STATUS_EMAIL[newStatus]
   if (newStatus && say) await mailClient(r, `${r.id} is ${newStatus}`, say(r))
+  if (newAssignee && newAssignee.id !== admin.id) await deliver([newAssignee.email], `${r.id} was assigned to you`, [`${admin.name} assigned "${r.title}" (${r.client_name}) to you.`], adminLink(r.id), 'Open report')
   return c.json({ report: await withHistory(await loadReport(admin, r.id), admin) })
 })
 
@@ -742,6 +775,60 @@ app.patch('/api/reports/:id/details', async (c) => {
     await mailAdmins(`${r.id} · Updated by ${r.client_name}`, [`${user.name} updated the ${changed.join(' and ')} of "${r.title}".`], r.id)
   }
   return c.json({ report: await withHistory(await loadReport(user, r.id), user) })
+})
+
+// The people reports can be assigned to.
+app.get('/api/admin/team', async (c) => {
+  requireAdmin(c)
+  const team = await all<{ id: string; name: string }>("SELECT id, name FROM users WHERE role = 'admin' AND removed_at IS NULL ORDER BY name")
+  return c.json({ team })
+})
+
+// How I want to be emailed: as things happen, or one summary a day.
+app.patch('/api/me/notifications', async (c) => {
+  const user = requireUser(c)
+  const mode = oneOf((await json(c)).mode, ['instant', 'digest'] as const, 'mode')
+  await run('UPDATE users SET notify_mode = $1 WHERE id = $2', mode, user.id)
+  return c.json({ notify: mode })
+})
+
+// Change several reports at once: status, severity and owner. Each gets its own history entry, and clients are
+// emailed about a status change exactly as they would be one at a time.
+app.post('/api/admin/reports/bulk', async (c) => {
+  const admin = requireAdmin(c)
+  const body = await json(c)
+  const ids = Array.isArray(body.ids) ? [...new Set(body.ids.filter((i): i is string => typeof i === 'string' && /^[A-Z0-9]+-\d+$/.test(i)))] : []
+  if (ids.length === 0) throw new HttpError(400, 'Choose at least one report')
+  if (ids.length > 100) throw new HttpError(400, 'Choose 100 reports or fewer at a time')
+  const status = body.status === undefined || body.status === '' ? null : oneOf(body.status, STATUSES, 'status')
+  const severity = body.severity === undefined || body.severity === '' ? null : oneOf(body.severity, SEVERITIES, 'severity')
+  const hasAssignee = 'assigneeId' in body && body.assigneeId !== undefined && body.assigneeId !== null && body.assigneeId !== '__keep'
+  const wanted = hasAssignee ? text(body.assigneeId, 'assigneeId', 100) : ''
+  if (!status && !severity && !hasAssignee) throw new HttpError(400, 'Choose something to change')
+  const who = wanted ? await one<{ id: string; name: string; email: string }>("SELECT id, name, email FROM users WHERE id = $1 AND role = 'admin' AND removed_at IS NULL", wanted) : null
+  if (wanted && !who) throw new HttpError(400, 'That person is not on the team')
+
+  let updated = 0
+  const assigned: ReportRow[] = []
+  for (const id of ids) {
+    const r = await one<ReportRow>(`${REPORT_SELECT} WHERE r.id = $1 AND r.submitted_at IS NOT NULL`, id)
+    if (!r) continue
+    const stmts: Stmt[] = []
+    if (severity && severity !== r.severity) stmts.push(['UPDATE reports SET severity = $1 WHERE id = $2', [severity, r.id]])
+    if (hasAssignee && (who?.id ?? null) !== r.assignee_id) {
+      stmts.push(['UPDATE reports SET assignee_id = $1 WHERE id = $2', [who?.id ?? null, r.id]], historyStmt(r.id, 'admin', 'edit', who ? `Assigned to ${who.name}` : 'Unassigned'))
+      if (who && who.id !== admin.id) assigned.push(r)
+    }
+    const move = status && status !== r.status ? status : null
+    if (move) stmts.push(...statusStmts(r, move))
+    if (stmts.length === 0) continue
+    await batch(stmts)
+    updated++
+    const say = move && STATUS_EMAIL[move]
+    if (move && say) await mailClient(r, `${r.id} is ${move}`, say(r))
+  }
+  if (who && assigned.length) await deliver([who.email], `${assigned.length} ${assigned.length === 1 ? 'report was' : 'reports were'} assigned to you`, [`${admin.name} assigned you: ${assigned.map((r) => r.id).join(', ')}.`], `${config.appUrl}/admin/tracker?mine=1`, 'Open my queue')
+  return c.json({ updated })
 })
 
 // ---------- roadmap items ----------
@@ -1086,7 +1173,47 @@ app.post('/api/admin/clients/:id/delete', async (c) => {
 
 // ---------- scheduled housekeeping (Vercel Cron) ----------
 
+const DAY = 24 * 3600_000
+
+/** Gentle nudges for things stuck waiting on a client: after three quiet days, at most three times. */
+export async function sendReminders() {
+  const quiet = new Date(Date.now() - 3 * DAY).toISOString()
+  const rows = await all<ReportRow>(
+    `${REPORT_SELECT} WHERE r.submitted_at IS NOT NULL AND r.status IN ('Needs client input', 'Ready to verify')
+        AND COALESCE((SELECT MAX(h.at) FROM history h WHERE h.report_id = r.id), r.created_at) < $1
+        AND (SELECT COUNT(*) FROM history h WHERE h.report_id = r.id AND h.by = 'system' AND h.text LIKE 'Reminder sent%') < 3`,
+    quiet,
+  )
+  for (const r of rows) {
+    const line = r.status === 'Ready to verify' ? `The fix for "${r.title}" is ready and waiting for you to check it.` : `We are waiting for your reply on "${r.title}".`
+    await mailClient(r, `Reminder: ${r.id} is waiting for you`, [line])
+    await addHistory(r.id, 'system', 'edit', 'Reminder sent to the client')
+  }
+  return rows.length
+}
+
+/** One email per person with everything that happened since the last one, for those who chose a daily summary. */
+export async function sendDigests() {
+  const rows = await all<{ id: number; email: string; subject: string; line: string; url: string }>('SELECT id, email, subject, line, url FROM notification_queue WHERE sent_at IS NULL ORDER BY id')
+  const byPerson = new Map<string, typeof rows>()
+  for (const r of rows) (byPerson.get(r.email) ?? byPerson.set(r.email, []).get(r.email)!).push(r)
+  for (const [email, items] of byPerson) {
+    const subject = `Your SEAM summary: ${items.length} ${items.length === 1 ? 'update' : 'updates'}`
+    const ok = await sendQuietly({
+      to: [email],
+      subject,
+      text: `${items.map((i) => `- ${i.subject}\n  ${i.line}\n  ${i.url}`).join('\n\n')}`,
+      html: layout(subject, `<ul>${items.map((i) => `<li><a href="${escapeHtml(i.url)}"><strong>${escapeHtml(i.subject)}</strong></a><br>${escapeHtml(i.line)}</li>`).join('')}</ul>`, { label: 'Open SEAM', url: config.appUrl }),
+    })
+    if (ok) await run('UPDATE notification_queue SET sent_at = $1 WHERE id = ANY($2::int[])', now(), `{${items.map((i) => i.id).join(',')}}`)
+  }
+  await run('DELETE FROM notification_queue WHERE sent_at IS NOT NULL AND sent_at < $1', new Date(Date.now() - 7 * DAY).toISOString())
+  return byPerson.size
+}
+
 export async function housekeeping() {
+  await sendReminders()
+  await sendDigests()
   const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString()
   await run('DELETE FROM reports WHERE submitted_at IS NULL AND created_at < $1', cutoff)
   await run('DELETE FROM login_tokens WHERE expires_at < $1', now())

@@ -49,10 +49,23 @@ const EXT: Record<string, string> = {
  *  - blob:   the browser uploads straight to Vercel Blob, then tells the API it is done.
  *  - server: the browser PUTs the file to the API (local development).
  */
-export async function uploadVideo(reportId: string, blob: Blob, mode: UploadMode, flow: UploadFlow | undefined, onProgress: (fraction: number) => void): Promise<Report> {
+/** Runs an upload, trying again after a dropped connection or a server hiccup: three more tries, waiting longer each time. */
+async function withRetries<T>(fn: () => Promise<T>, onRetry?: (attempt: number) => void): Promise<T> {
+  const waits = [1000, 3000, 8000]
+  for (let i = 0; ; i++) {
+    try { return await fn() } catch (e) {
+      const transient = e instanceof ApiError && (e.status === 0 || e.status >= 500)
+      if (!transient || i >= waits.length) throw e
+      onRetry?.(i + 1)
+      await new Promise((r) => setTimeout(r, waits[i]))
+    }
+  }
+}
+
+export async function uploadVideo(reportId: string, blob: Blob, mode: UploadMode, flow: UploadFlow | undefined, onProgress: (fraction: number) => void, onRetry?: (attempt: number) => void): Promise<Report> {
   const mime = (blob.type || '').split(';')[0] || 'video/webm'
   if (!EXT[mime]) throw new ApiError(415, 'Unsupported video type. Use WebM, MP4 or MOV.')
-  return mode === 'blob' ? uploadToBlob(reportId, blob, mime, flow ?? 'token', onProgress) : uploadToServer(reportId, blob, mime, onProgress)
+  return withRetries(() => (mode === 'blob' ? uploadToBlob(reportId, blob, mime, flow ?? 'token', onProgress) : uploadToServer(reportId, blob, mime, onProgress)), onRetry)
 }
 
 async function uploadToBlob(reportId: string, blob: Blob, mime: string, flow: UploadFlow, onProgress: (f: number) => void): Promise<Report> {

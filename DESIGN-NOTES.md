@@ -98,3 +98,13 @@ The handoff notes that it does not establish that the name SEAM is available. Ch
 - Clients see plain status words: Received, Reviewing, In progress, Needs you, Ready to verify, Done. The team keeps the finer statuses.
 - After sending, the new item opens over the list.
 - Items are numbered per project (ACME-1, ACME-2). Existing items keep their old ids (BUG-0001 and so on).
+
+## Phase 1: faster triage and follow-up
+
+- **Owners:** every report can be assigned to someone on the team (in the ticket, in bulk, or automatically when you press Start triage). The new owner gets an email. A "Mine" tile and an owner filter in the Tracker act as a personal queue (`/admin/tracker?mine=1`). Clients never see owners.
+- **Bulk changes:** tick rows in the Tracker, then set status, severity and owner for all of them at once. Clients are emailed about status changes exactly as if each had been changed one by one.
+- **Waiting time:** the Inbox flags how long something has sat, and the Tracker has an optional Waiting column.
+- **Reminders:** a client who has not answered for three days (a question, or a fix to check) gets a reminder, at most three times. This runs in the nightly cleanup job.
+- **Email preference:** each person chooses "as they happen" or "one summary a day" on their Account page. Sign-in and password emails always go straight away.
+- **Clients:** an unfinished report (text and video) survives a refresh or closed tab; similar open items are suggested before sending; a dropped connection during upload is retried three times before it asks the person to try again.
+- **Not built:** truly resumable uploads. A failed upload still restarts from the beginning, though the recording is kept so nobody has to record again.

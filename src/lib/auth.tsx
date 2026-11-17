@@ -20,6 +20,8 @@ interface Auth {
   /** Sets the password from a link, and signs in. */
   setPassword: (token: string, password: string) => Promise<void>
   changePassword: (current: string, next: string) => Promise<void>
+  /** Choose between email as things happen and one summary a day. */
+  setNotify: (mode: 'instant' | 'digest') => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -62,6 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const changePassword = useCallback(async (current: string, next: string) => {
     await api.post('/api/auth/password', { current, next })
   }, [])
+  const setNotify = useCallback(async (mode: 'instant' | 'digest') => {
+    await api.patch('/api/me/notifications', { mode })
+    setUser((u) => (u ? { ...u, notify: mode } : u))
+  }, [])
   const signOut = useCallback(async () => {
     await api.post('/api/auth/logout').catch(() => {})
     forgetReturnPath()
@@ -70,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
-  return <Ctx.Provider value={{ user, maxVideoMb, loading, signIn, forgot, checkLink, setPassword, changePassword, signOut }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ user, maxVideoMb, loading, signIn, forgot, checkLink, setPassword, changePassword, setNotify, signOut }}>{children}</Ctx.Provider>
 }
 
 export function useAuth(): Auth {
